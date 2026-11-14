@@ -81,8 +81,12 @@ Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
   if (req.method !== "POST") return json({ error: "Méthode non autorisée." }, 405);
 
-  const apiKey = Deno.env.get("ANTHROPIC_API_KEY");
+  const apiKey = (Deno.env.get("ANTHROPIC_API_KEY") || "").trim();
   if (!apiKey) return json({ error: "La clé de l'IA n'est pas configurée sur le serveur." }, 500);
+  // Le secret doit contenir la clé seule, pas une commande ou un texte autour.
+  if (!/^sk-ant-[A-Za-z0-9_-]+$/.test(apiKey)) {
+    return json({ error: "Le secret ANTHROPIC_API_KEY de Supabase n'a pas le bon format : il doit contenir uniquement la clé (sk-ant-…)." }, 500);
+  }
 
   // Utilisateur connecté (le jeton est vérifié auprès de Supabase).
   const admin = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
@@ -161,7 +165,9 @@ Deno.serve(async (req: Request) => {
       console.error("anthropic api", error.status, error.message);
       return json({ error: "L'IA est indisponible pour le moment. Réessaie plus tard." }, 502);
     }
-    console.error("unexpected", error);
+    // Ne jamais écrire la clé dans les journaux, même via un message d'erreur.
+    const message = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+    console.error("unexpected", message.split(apiKey).join("[clé]").slice(0, 300));
     return json({ error: "Erreur inattendue pendant l'analyse." }, 500);
   }
 
