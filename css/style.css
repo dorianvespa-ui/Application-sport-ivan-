@@ -353,6 +353,24 @@ input:focus-visible, button:focus-visible, .seg input:focus-visible + span {
 .btn.small { padding: 10px 14px; flex: none; }
 .btn:disabled { opacity: .5; cursor: default; }
 .btn-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.btn-row.three { grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.btn.stack { flex-direction: column; gap: 2px; font-size: .8rem; padding: 10px 4px; line-height: 1.2; }
+.btn.stack span { font-size: 1.1rem; }
+.history { max-height: 280px; overflow-y: auto; border: 1.5px solid var(--line); border-radius: 14px; padding: 0 12px; }
+.history-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 10px 0;
+  border: 0;
+  border-top: 1px solid var(--line);
+  background: none;
+  text-align: left;
+}
+.history-item:first-child { border-top: 0; }
+.history .muted { padding: 12px 0; }
+
 
 .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: -6px; }
 .chips:empty { display: none; }

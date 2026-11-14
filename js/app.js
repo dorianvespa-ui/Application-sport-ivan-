@@ -449,10 +449,12 @@ function openFoodSheet(mealId) {
   const meal = MEALS.find((m) => m.id === mealId);
   openSheet(`${meal.icon} ${meal.label}`, `
     <form class="form" data-form="food" data-meal="${mealId}" novalidate>
-      <div class="btn-row">
-        <button type="button" class="btn secondary" data-act="scan">▮▯▮ Scanner</button>
-        <button type="button" class="btn secondary" disabled>📷 Photo (bientôt)</button>
+      <div class="btn-row three">
+        <button type="button" class="btn secondary stack" data-act="scan"><span aria-hidden="true">▮▯▮</span>Scanner</button>
+        <button type="button" class="btn secondary stack" data-act="history" aria-expanded="false" aria-controls="history"><span aria-hidden="true">↺</span>Historique</button>
+        <button type="button" class="btn secondary stack" disabled><span aria-hidden="true">📷</span>Photo (bientôt)</button>
       </div>
+      <div id="history" class="history" hidden></div>
       <div id="scan-zone" hidden>
         <div id="reader"></div>
         <div class="inline">
@@ -501,7 +503,7 @@ function updateSuggestions(form) {
   const q = norm(form.name.value.trim());
   const recents = store.recentFoods().map((it) => ({ name: it.name, kcal: it.kcal, kcal100: it.kcal100, qty: it.qty, recent: true }));
   let list;
-  if (!q) list = recents.slice(0, 6);
+  if (!q) list = []; // rien tant qu'on n'a pas tapé : l'historique a son bouton
   else {
     const inRecents = recents.filter((r) => norm(r.name).includes(q));
     const names = new Set(inRecents.map((r) => norm(r.name)));
@@ -517,6 +519,32 @@ function updateSuggestions(form) {
         `<button type="button" class="chip" data-act="pick-food" data-i="${i}">${s.recent ? '↺ ' : ''}${esc(s.name)} <small>${s.kcal100 ? `${fmt(s.kcal100)}/100 g` : `${fmt(s.kcal)} kcal`}</small></button>`
     )
     .join('');
+}
+
+// Historique : aliments déjà saisis, du plus récent au plus ancien.
+let historyItems = [];
+
+function toggleHistory(force) {
+  const panel = $('#history');
+  const btn = $('[data-act="history"]');
+  const open = force ?? panel.hidden;
+  if (open) {
+    stopScanner();
+    $('#scan-zone').hidden = true;
+    scanMsg('');
+    historyItems = store.recentFoods(40);
+    panel.innerHTML = historyItems.length
+      ? historyItems
+          .map(
+            (it, i) => `<button type="button" class="history-item" data-act="pick-history" data-i="${i}">
+              <span class="row-main"><b>${esc(it.name)}</b><small>${it.qty ? `${fmt(it.qty)} g · ${fmt(it.kcal100)} kcal/100 g` : 'Calories totales'}</small></span>
+              <span class="row-val">${fmt(it.kcal)}</span></button>`
+          )
+          .join('')
+      : '<p class="muted">Aucun aliment enregistré pour l\'instant.</p>';
+  }
+  panel.hidden = !open;
+  btn.setAttribute('aria-expanded', String(open));
 }
 
 function fillFood(form, s) {
@@ -565,6 +593,7 @@ async function handleCode(code) {
 
 async function startScan() {
   const zone = $('#scan-zone');
+  toggleHistory(false);
   zone.hidden = false;
   scanMsg('Place le code-barres dans le cadre, à 20–30 cm, bien net. La lecture est automatique.');
   try {
@@ -655,6 +684,13 @@ document.addEventListener('click', (e) => {
     }
     case 'pick-food':
       fillFood(el.closest('form'), suggestions[Number(d.i)]);
+      break;
+    case 'history':
+      toggleHistory();
+      break;
+    case 'pick-history':
+      fillFood(el.closest('form'), historyItems[Number(d.i)]);
+      toggleHistory(false);
       break;
     case 'del-food':
       store.updateDay(ui.date, (day) => {
