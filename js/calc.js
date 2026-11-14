@@ -7,7 +7,32 @@ export const MEALS = [
   { id: 'dinner', label: 'Dîner', icon: '🌙' },
 ];
 
+// Nutriments suivis, en grammes.
+export const MACROS = [
+  { id: 'protein', label: 'Protéines', short: 'P' },
+  { id: 'carbs', label: 'Glucides', short: 'G' },
+  { id: 'fiber', label: 'Fibres', short: 'F' },
+];
+
 export const KCAL_PER_KG_FAT = 7700;
+
+// Additionne les nutriments d'une liste d'aliments. `missing` compte les
+// aliments saisis sans aucun nutriment (le total est alors sous-estimé).
+export function sumMacros(items) {
+  const total = { protein: 0, carbs: 0, fiber: 0, missing: 0 };
+  for (const it of items) {
+    const m = it.macros || {};
+    let any = false;
+    for (const { id } of MACROS) {
+      if (m[id] != null) {
+        total[id] += Number(m[id]) || 0;
+        any = true;
+      }
+    }
+    if (!any) total.missing++;
+  }
+  return total;
+}
 
 // ---------- Dates (clés locales AAAA-MM-JJ) ----------
 
@@ -86,11 +111,14 @@ export function dayStats(day, profile, weightKg, key) {
   const stepsKcal = stepsToKcal(netSteps, person);
   const sportKcal = day.workouts.reduce((s, w) => s + (Number(w.kcal) || 0), 0);
   const mealTotals = {};
+  const mealMacros = {};
   let eaten = 0;
   for (const m of MEALS) {
     mealTotals[m.id] = (day.meals[m.id] || []).reduce((s, it) => s + itemKcal(it), 0);
+    mealMacros[m.id] = sumMacros(day.meals[m.id] || []);
     eaten += mealTotals[m.id];
   }
+  const macros = sumMacros(MEALS.flatMap((m) => day.meals[m.id] || []));
   const burned = bmrKcal + stepsKcal + sportKcal;
   return {
     weightKg,
@@ -103,6 +131,8 @@ export function dayStats(day, profile, weightKg, key) {
     burned,
     eaten,
     mealTotals,
+    mealMacros,
+    macros,
     balance: eaten - burned, // négatif = déficit
     logged: eaten > 0,
   };

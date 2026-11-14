@@ -1,4 +1,4 @@
-import { MEALS, KCAL_PER_KG_FAT, todayKey, addDays, fromKey, weekStart, dayStats, bmr, ageAt } from './calc.js';
+import { MEALS, MACROS, KCAL_PER_KG_FAT, todayKey, addDays, fromKey, weekStart, dayStats, bmr, ageAt } from './calc.js';
 import * as store from './store.js';
 import { FOODS } from './foods.js';
 import { startScanner, stopScanner, lookupProduct } from './scanner.js';
@@ -13,6 +13,13 @@ const fmt = (n) => Math.round(n).toLocaleString('fr-FR');
 const signed = (n) => (Math.round(n) > 0 ? '+' : Math.round(n) < 0 ? '−' : '') + fmt(Math.abs(n));
 const norm = (s) => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
 const num = (v) => Number(String(v ?? '').replace(',', '.')) || 0;
+// Grammes : une décimale sous 10 g, entier au-delà (« 4,5 », « 32 »).
+const g1 = (v) => (v < 10 ? String(Math.round(v * 10) / 10).replace('.', ',') : fmt(v));
+// « P 32 g · G 60 g · F 8 g » pour les nutriments renseignés.
+const macroLine = (m) =>
+  MACROS.filter(({ id }) => m && m[id] != null)
+    .map(({ id, short }) => `${short} ${g1(m[id])} g`)
+    .join(' · ');
 const cap = (s) => s.charAt(0).toUpperCase() + s.slice(1);
 
 const dfLong = new Intl.DateTimeFormat('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' });
@@ -101,6 +108,7 @@ function dayView() {
   </header>
 
   ${heroCard(s, p)}
+  ${nutritionCard(s.macros, p, s.logged)}
 
   <section class="card">
     <div class="card-head"><h2>Dépenses</h2><strong>${fmt(s.burned)} kcal</strong></div>
@@ -176,18 +184,44 @@ function heroCard(s, p) {
   </section>`;
 }
 
+// Récapitulatif protéines / glucides / fibres du jour.
+function nutritionCard(m, p, logged) {
+  const goal = p.proteinGoal || 0;
+  const pct = goal ? Math.min(100, (m.protein / goal) * 100) : 0;
+  const reached = goal > 0 && m.protein >= goal;
+  return `
+  <section class="card nutri" aria-label="Nutrition du jour">
+    <div class="nutri-main">
+      <div class="nutri-head"><small>Protéines</small>${reached ? '<span class="pill good">Objectif atteint</span>' : ''}</div>
+      <p class="nutri-big"><b>${g1(m.protein)}</b>${goal ? ` <span>/ ${fmt(goal)} g</span>` : ' <span>g</span>'}</p>
+      ${
+        goal
+          ? `<div class="bar" role="progressbar" aria-valuemin="0" aria-valuemax="${goal}" aria-valuenow="${Math.round(m.protein)}" aria-label="Protéines"><i style="width:${pct.toFixed(1)}%"></i></div>
+             <small class="muted">${reached ? `${g1(m.protein - goal)} g au-delà de l'objectif` : `Encore ${g1(goal - m.protein)} g`}</small>`
+          : '<small class="muted">Fixe un objectif de protéines dans l\'onglet Profil.</small>'
+      }
+    </div>
+    <div class="nutri-side">
+      <div><small>Glucides</small><b>${g1(m.carbs)} g</b></div>
+      <div><small>Fibres</small><b>${g1(m.fiber)} g</b></div>
+    </div>
+    ${logged && m.missing ? `<small class="nutri-note">${m.missing} aliment${m.missing > 1 ? 's' : ''} sans nutriments renseignés : ces totaux sont sous-estimés.</small>` : ''}
+  </section>`;
+}
+
 function mealCard(m, day, s, key) {
   const items = day.meals[m.id];
   const prev = store.getDay(addDays(key, -1)).meals[m.id];
   return `
   <section class="card meal">
     <div class="card-head"><h3><span>${m.icon}</span> ${m.label}</h3>${items.length ? `<strong>${fmt(s.mealTotals[m.id])} kcal</strong>` : ''}</div>
+    ${items.length > 1 && s.mealMacros[m.id].missing < items.length ? `<p class="meal-macros">${macroLine(s.mealMacros[m.id])}</p>` : ''}
     ${items
       .map(
         (it) => `
     <div class="swipe"><div class="row swipe-content">
-      <div class="row-main"><b>${esc(it.name)}</b>${it.qty ? `<small>${fmt(it.qty)} g · ${fmt(it.kcal100)} kcal/100 g</small>` : ''}</div>
-      <span class="row-val">${fmt(it.kcal)}</span>
+      <div class="row-main"><b>${esc(it.name)}</b>${[it.qty ? `${fmt(it.qty)} g` : '', macroLine(it.macros)].filter(Boolean).map((t) => `<small>${t}</small>`).join('')}</div>
+      <span class="row-val">${fmt(it.kcal)}<small>kcal</small></span>
     </div><button class="swipe-del" data-act="del-food" data-meal="${m.id}" data-id="${it.id}" aria-label="Supprimer ${esc(it.name)}">Supprimer</button></div>`
       )
       .join('')}
@@ -235,7 +269,8 @@ function statsView() {
     <div class="tile"><small>Jours en ${gain ? 'surplus' : 'déficit'}</small><b>${goalDays} / ${n}</b><span>${n < 7 ? `${n} jour${n > 1 ? 's' : ''} renseigné${n > 1 ? 's' : ''}` : 'semaine complète'}</span></div>
     <div class="tile"><small>Moyenne par jour</small><b>${signed(total / n)}</b><span>kcal de bilan</span></div>
     <div class="tile"><small>Ingéré / dépensé</small><b>${fmt(sum((d) => d.eaten) / n)}</b><span>pour ${fmt(sum((d) => d.burned) / n)} kcal dépensées / jour</span></div>
-  </section>`
+  </section>
+  ${weekNutrition(logged)}`
   }
 
   <section class="card">
@@ -246,6 +281,24 @@ function statsView() {
   <section class="card">
     <div class="card-head"><h2>Poids</h2><button class="link" data-act="open-weight">+ Pesée</button></div>
     ${weightBlock()}
+  </section>`;
+}
+
+// Moyennes de nutriments sur les jours renseignés de la semaine.
+function weekNutrition(days) {
+  const n = days.length;
+  const avg = (id) => days.reduce((t, d) => t + d.macros[id], 0) / n;
+  const goal = profile().proteinGoal || 0;
+  const hit = days.filter((d) => goal && d.macros.protein >= goal).length;
+  const missing = days.reduce((t, d) => t + d.macros.missing, 0);
+  return `
+  <section class="card">
+    <div class="card-head"><h2>Nutrition</h2><small class="muted">moyenne par jour</small></div>
+    <div class="nutri-row">
+      ${MACROS.map(({ id, label }) => `<div><small>${label}</small><b>${g1(avg(id))} g</b></div>`).join('')}
+    </div>
+    ${goal ? `<p class="muted">Objectif de ${fmt(goal)} g de protéines atteint <b>${hit} jour${hit > 1 ? 's' : ''} sur ${n}</b>.</p>` : ''}
+    ${missing ? `<small class="nutri-note">${missing} aliment${missing > 1 ? 's' : ''} sans nutriments renseignés cette semaine : moyennes sous-estimées.</small>` : ''}
   </section>`;
 }
 
@@ -349,7 +402,9 @@ function profileFields(p) {
       <label><input type="radio" name="goal" value="gain" ${p.goal === 'gain' ? 'checked' : ''}><span>Prise de masse</span></label>
     </fieldset>
     <label class="field">Déficit ou surplus visé par jour (kcal) <input name="targetKcal" type="number" inputmode="numeric" min="0" max="1500" step="50" value="${goalOf(p).kcal || ''}" placeholder="Optionnel, ex. 300"></label>
-    <small class="muted">Perte de poids : calories à manger en moins que ta dépense. Prise de masse : calories à manger en plus.</small>`;
+    <small class="muted">Perte de poids : calories à manger en moins que ta dépense. Prise de masse : calories à manger en plus.</small>
+    <label class="field">Objectif de protéines par jour (g) <input name="proteinGoal" type="number" inputmode="numeric" min="0" max="400" step="5" value="${p.proteinGoal || ''}" placeholder="Optionnel, ex. 120"></label>
+    ${p.weightKg ? `<small class="muted">Repère courant chez les sportifs : 1,6 à 2 g par kg de poids, soit ${fmt(p.weightKg * 1.6)} à ${fmt(p.weightKg * 2)} g pour toi.</small>` : '<small class="muted">Repère courant chez les sportifs : 1,6 à 2 g par kg de poids.</small>'}`;
 }
 
 function authView() {
@@ -408,6 +463,7 @@ function profileView() {
     <ul class="notes">
       <li><b>Métabolisme de base</b> : formule de Mifflin-St Jeor (sexe, âge, taille, poids).</li>
       <li><b>Pas</b> : distance estimée d'après ta taille, puis environ 0,5 kcal par kg et par km.</li>
+      <li><b>Nutriments</b> : repris de la base Open Food Facts au scan, de valeurs moyennes pour les aliments courants, ou de ta saisie.</li>
       <li><b>Séances</b> : saisis les calories <em>actives</em> de ta montre, pas les calories totales.</li>
       <li>Ce sont des estimations : fie-toi à la tendance de la semaine plus qu'à un jour isolé.</li>
     </ul>
@@ -476,6 +532,12 @@ function openFoodSheet(mealId) {
         <label class="field">kcal / 100 g <input name="kcal100" type="number" inputmode="decimal" min="0" step="1"></label>
         <label class="field">Quantité (g) <input name="qty" type="number" inputmode="decimal" min="0" step="1"></label>
       </div>
+      <fieldset class="macros">
+        <legend>Nutriments <span id="macro-unit">au total</span> <small>(optionnel)</small></legend>
+        <div class="grid3">
+          ${MACROS.map(({ id, label }) => `<label class="field">${label} (g) <input name="m_${id}" type="number" inputmode="decimal" min="0" step="0.1"></label>`).join('')}
+        </div>
+      </fieldset>
       <p id="food-preview" class="preview" hidden></p>
       <p id="food-error" class="error" hidden></p>
       <button class="btn" type="submit">Ajouter</button>
@@ -488,20 +550,41 @@ function foodKcal(form) {
   return num(form.kcal.value);
 }
 
+// Nutriments du formulaire, en grammes pour la quantité saisie.
+// Renvoie { macros, macros100 } (macros100 seulement en mode « pour 100 g »).
+function foodMacros(form) {
+  const per100 = form.mode.value === 'per100';
+  const qty = num(form.qty.value);
+  const macros = {}, macros100 = {};
+  let any = false;
+  for (const { id } of MACROS) {
+    const raw = form[`m_${id}`].value.trim();
+    if (raw === '') continue;
+    any = true;
+    const v = Math.max(0, num(raw));
+    if (per100) macros100[id] = v;
+    macros[id] = Math.round((per100 ? (v * qty) / 100 : v) * 10) / 10;
+  }
+  if (!any) return {};
+  return per100 ? { macros, macros100 } : { macros };
+}
+
 function syncFoodForm(form) {
   const per100 = form.mode.value === 'per100';
   $('[data-mode="total"]', form).hidden = per100;
   $('[data-mode="per100"]', form).hidden = !per100;
   const prev = $('#food-preview');
   const k = foodKcal(form);
+  $('#macro-unit').textContent = per100 ? 'pour 100 g' : 'au total';
+  const line = macroLine(foodMacros(form).macros);
   prev.hidden = !(per100 && k > 0);
-  prev.textContent = `= ${fmt(k)} kcal`;
+  prev.innerHTML = `= ${fmt(k)} kcal${line ? `<small>${line}</small>` : ''}`;
   $('#food-error').hidden = true;
 }
 
 function updateSuggestions(form) {
   const q = norm(form.name.value.trim());
-  const recents = store.recentFoods().map((it) => ({ name: it.name, kcal: it.kcal, kcal100: it.kcal100, qty: it.qty, recent: true }));
+  const recents = store.recentFoods().map((it) => ({ ...it, recent: true }));
   let list;
   if (!q) list = []; // rien tant qu'on n'a pas tapé : l'historique a son bouton
   else {
@@ -509,7 +592,7 @@ function updateSuggestions(form) {
     const names = new Set(inRecents.map((r) => norm(r.name)));
     const inDb = FOODS.filter(([n]) => norm(n).includes(q) && !names.has(norm(n)))
       .sort((a, b) => norm(a[0]).indexOf(q) - norm(b[0]).indexOf(q))
-      .map(([name, kcal100, qty]) => ({ name, kcal100, qty }));
+      .map(([name, kcal100, qty, protein, carbs, fiber]) => ({ name, kcal100, qty, macros100: { protein, carbs, fiber } }));
     list = [...inRecents, ...inDb].slice(0, 6);
   }
   suggestions = list;
@@ -558,6 +641,9 @@ function fillFood(form, s) {
     form.kcal.value = s.kcal ?? '';
     if (s.kcal == null) form.qty.value = s.qty || 100;
   }
+  // Nutriments : pour 100 g si l'aliment est saisi ainsi, sinon au total.
+  const src = form.mode.value === 'per100' ? s.macros100 : s.macros;
+  for (const { id } of MACROS) form[`m_${id}`].value = src?.[id] ?? '';
   syncFoodForm(form);
   $('#suggest').innerHTML = '';
 }
@@ -580,7 +666,7 @@ async function handleCode(code) {
     const p = await lookupProduct(code);
     const form = $('[data-form="food"]');
     if (!form) return;
-    fillFood(form, { name: p.name, kcal100: p.kcal100, qty: p.portion, kcal: null });
+    fillFood(form, { name: p.name, kcal100: p.kcal100, qty: p.portion, kcal: null, macros100: p.macros100 });
     scanMsg(
       p.kcal100 ? `Produit trouvé. Vérifie la quantité mangée.` : `Produit trouvé, mais sans calories dans la base : complète-les.`,
       p.kcal100 ? 'ok' : 'warn'
@@ -781,6 +867,7 @@ document.addEventListener('submit', (e) => {
         weightKg: num(f.weightKg.value),
         goal: f.goal.value === 'gain' ? 'gain' : 'loss',
         targetKcal: Math.max(0, Math.round(num(f.targetKcal.value))),
+        proteinGoal: Math.max(0, Math.round(num(f.proteinGoal.value))),
       };
       store.getState().profile = next;
       store.save();
@@ -804,6 +891,7 @@ document.addEventListener('submit', (e) => {
         item.kcal100 = num(f.kcal100.value);
         item.qty = num(f.qty.value);
       }
+      Object.assign(item, foodMacros(form));
       store.updateDay(ui.date, (day) => day.meals[form.dataset.meal].push(item));
       closeSheet();
       render();

@@ -109,7 +109,10 @@ export async function stopScanner() {
   s.host.innerHTML = '';
 }
 
-// Renvoie { name, kcal100, portion } ou lève une erreur lisible.
+// Valeur en grammes arrondie au dixième, ou null si la base ne la donne pas.
+const grams = (v) => (v == null || v === '' || Number.isNaN(Number(v)) ? null : Math.round(Number(v) * 10) / 10);
+
+// Renvoie { name, kcal100, portion, macros100 } ou lève une erreur lisible.
 export async function lookupProduct(code) {
   const url = `https://world.openfoodfacts.org/api/v2/product/${encodeURIComponent(code)}.json?fields=product_name,product_name_fr,brands,nutriments,serving_quantity`;
   let res;
@@ -132,5 +135,6 @@ export async function lookupProduct(code) {
     name: brand && !title.toLowerCase().includes(brand.toLowerCase()) ? `${title} (${brand})` : title,
     kcal100: kcal100 ? Math.round(kcal100) : null,
     portion: Number(p.serving_quantity) || null,
+    macros100: { protein: grams(n.proteins_100g), carbs: grams(n.carbohydrates_100g), fiber: grams(n.fiber_100g) },
   };
 }

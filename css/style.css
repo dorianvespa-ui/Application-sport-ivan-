@@ -512,3 +512,30 @@ input:focus-visible, button:focus-visible, .seg input:focus-visible + span {
   text-align: left;
 }
 .field input[type="date"]::-webkit-date-and-time-value { text-align: left; margin: 0; }
+
+/* ---------- Nutriments ---------- */
+
+.nutri { display: grid; grid-template-columns: 1.5fr 1fr; gap: 14px 18px; align-items: center; }
+.nutri-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 26px; }
+.nutri-head small, .nutri-side small, .nutri-row small { color: var(--muted); font-weight: 600; }
+.nutri .pill.good { background: var(--green-soft); color: var(--green); font-size: .72rem; padding: 3px 8px; }
+.nutri-big { font-variant-numeric: tabular-nums; margin: 2px 0 8px; }
+.nutri-big b { font-size: 1.9rem; letter-spacing: -.02em; line-height: 1.1; }
+.nutri-big span { color: var(--muted); font-weight: 600; }
+.bar { height: 8px; border-radius: 99px; background: var(--field); overflow: hidden; margin-bottom: 6px; }
+.bar i { display: block; height: 100%; border-radius: 99px; background: var(--green); transition: width .4s ease; }
+.nutri-side { display: grid; gap: 10px; border-left: 1px solid var(--line); padding-left: 18px; }
+.nutri-side div, .nutri-row div { display: flex; flex-direction: column; }
+.nutri-side b, .nutri-row b { font-size: 1.15rem; font-variant-numeric: tabular-nums; }
+.nutri-note { grid-column: 1 / -1; color: var(--muted); display: block; }
+.nutri-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin: 6px 0 8px; }
+.meal-macros { color: var(--muted); font-size: .8rem; font-weight: 600; margin: -4px 0 4px; font-variant-numeric: tabular-nums; }
+.row-val small { display: block; font-weight: 500; color: var(--muted); font-size: .7rem; line-height: 1; }
+.row-main small + small { font-variant-numeric: tabular-nums; }
+.macros { border: 1.5px solid var(--line); border-radius: 16px; padding: 10px 12px 12px; margin: 0; min-width: 0; }
+.macros legend { font-size: .85rem; font-weight: 600; color: var(--muted); padding: 0 6px; }
+.macros legend small { font-weight: 500; }
+.grid3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; align-items: end; }
+.grid3 .field { font-size: .78rem; }
+.grid3 .field input { padding: 10px 8px; }
+.preview small { display: block; font-size: .85rem; font-weight: 600; color: var(--muted); margin-top: 2px; }
