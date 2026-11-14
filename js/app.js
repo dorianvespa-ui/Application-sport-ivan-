@@ -21,6 +21,10 @@ const dfWeekday = new Intl.DateTimeFormat('fr-FR', { weekday: 'long' });
 const ui = { view: 'day', date: todayKey(), week: weekStart(todayKey()) };
 
 const profile = () => store.getState().profile;
+// Objectif : perte de poids (déficit visé) ou prise de masse (surplus visé).
+const goalOf = (p) => ({ gain: p?.goal === 'gain', kcal: p?.targetKcal ?? p?.targetDeficit ?? 0 });
+// Couleur d'un bilan : vert s'il va dans le sens de l'objectif.
+const tone = (balance) => (Math.round(balance) === 0 || balance > 0 === goalOf(profile()).gain ? 'good' : 'bad');
 const statsFor = (key) => dayStats(store.getDay(key), profile(), store.weightAt(key), key);
 
 function toast(msg) {
@@ -126,22 +130,23 @@ function heroCard(s, p) {
   let pill = 'neutral';
   if (s.logged) {
     status = surplus ? 'Surplus calorique' : 'Déficit calorique';
-    pill = surplus ? 'bad' : 'good';
+    pill = tone(s.balance);
   }
   let goal = '';
-  if (p.targetDeficit > 0) {
-    const left = s.burned - p.targetDeficit - s.eaten;
-    goal =
-      left >= 0
-        ? `Objectif −${fmt(p.targetDeficit)} : encore <b>${fmt(left)} kcal</b> à manger`
-        : `Objectif −${fmt(p.targetDeficit)} : dépassé de <b>${fmt(-left)} kcal</b>`;
+  const g = goalOf(p);
+  if (g.kcal > 0) {
+    const left = s.burned + (g.gain ? g.kcal : -g.kcal) - s.eaten;
+    const label = `Objectif ${g.gain ? '+' : '−'}${fmt(g.kcal)}`;
+    if (left > 0) goal = `${label} : encore <b>${fmt(left)} kcal</b> à manger`;
+    else if (g.gain) goal = `${label} : atteint${Math.round(left) < 0 ? `, dépassé de <b>${fmt(-left)} kcal</b>` : ''}`;
+    else goal = `${label} : dépassé de <b>${fmt(-left)} kcal</b>`;
   }
   return `
   <section class="hero">
     <div class="ring">
       <svg viewBox="0 0 120 120" aria-hidden="true">
         <circle class="ring-track" cx="60" cy="60" r="52"/>
-        <circle class="ring-bar ${surplus ? 'over' : ''}" cx="60" cy="60" r="52" stroke-dasharray="${(C * ratio).toFixed(1)} ${C.toFixed(1)}" transform="rotate(-90 60 60)"/>
+        <circle class="ring-bar ${s.logged && tone(s.balance) === 'bad' ? 'over' : ''}" cx="60" cy="60" r="52" stroke-dasharray="${(C * ratio).toFixed(1)} ${C.toFixed(1)}" transform="rotate(-90 60 60)"/>
       </svg>
       <div class="ring-center"><b>${s.logged ? signed(s.balance) : fmt(s.burned)}</b><small>${s.logged ? 'kcal' : 'kcal dépensées'}</small></div>
     </div>
@@ -189,7 +194,8 @@ function statsView() {
   const n = logged.length;
   const sum = (f) => logged.reduce((t, d) => t + f(d), 0);
   const total = sum((d) => d.balance);
-  const deficitDays = logged.filter((d) => d.balance < 0).length;
+  const gain = goalOf(profile()).gain;
+  const goalDays = logged.filter((d) => (gain ? d.balance > 0 : d.balance < 0)).length;
   const isCurrent = ui.week === weekStart(today);
   const range = `${dfShort.format(fromKey(keys[0]))} – ${dfShort.format(fromKey(keys[6]))}`;
   const grams = Math.abs(total) / (KCAL_PER_KG_FAT / 1000);
@@ -202,7 +208,7 @@ function statsView() {
   </header>
 
   <section class="card">
-    <div class="card-head"><h2>Bilan par jour</h2><small class="legend"><i class="dot good"></i>déficit <i class="dot bad"></i>surplus</small></div>
+    <div class="card-head"><h2>Bilan par jour</h2><small class="legend"><i class="dot ${gain ? 'bad' : 'good'}"></i>déficit <i class="dot ${gain ? 'good' : 'bad'}"></i>surplus</small></div>
     ${weekChart(all)}
   </section>
 
@@ -211,8 +217,8 @@ function statsView() {
       ? `<section class="card empty"><p>Aucun repas saisi cette semaine.</p><small>Les jours sans repas ne comptent pas dans les moyennes.</small></section>`
       : `
   <section class="tiles">
-    <div class="tile ${total > 0 ? 'bad' : 'good'}"><small>Bilan de la semaine</small><b>${signed(total)}</b><span>kcal · ≈ ${fmt(grams)} g de graisse ${total > 0 ? 'en plus' : 'en moins'}</span></div>
-    <div class="tile"><small>Jours en déficit</small><b>${deficitDays} / ${n}</b><span>${n < 7 ? `${n} jour${n > 1 ? 's' : ''} renseigné${n > 1 ? 's' : ''}` : 'semaine complète'}</span></div>
+    <div class="tile ${tone(total)}"><small>Bilan de la semaine</small><b>${signed(total)}</b><span>kcal · ≈ ${fmt(grams)} g de ${gain ? 'poids' : 'graisse'} ${total > 0 ? 'en plus' : 'en moins'}</span></div>
+    <div class="tile"><small>Jours en ${gain ? 'surplus' : 'déficit'}</small><b>${goalDays} / ${n}</b><span>${n < 7 ? `${n} jour${n > 1 ? 's' : ''} renseigné${n > 1 ? 's' : ''}` : 'semaine complète'}</span></div>
     <div class="tile"><small>Moyenne par jour</small><b>${signed(total / n)}</b><span>kcal de bilan</span></div>
     <div class="tile"><small>Ingéré / dépensé</small><b>${fmt(sum((d) => d.eaten) / n)}</b><span>pour ${fmt(sum((d) => d.burned) / n)} kcal dépensées / jour</span></div>
   </section>`
@@ -231,7 +237,8 @@ function statsView() {
 
 function weekChart(days) {
   const W = 336, zero = 92, maxH = 58, col = W / 7;
-  const target = profile().targetDeficit || 0;
+  const g = goalOf(profile());
+  const target = g.kcal;
   const maxAbs = Math.max(400, target, ...days.filter((d) => d.logged && !d.future).map((d) => Math.abs(d.balance)));
   const letters = ['L', 'M', 'M', 'J', 'V', 'S', 'D'];
   const today = todayKey();
@@ -246,16 +253,16 @@ function weekChart(days) {
       const ty = deficit ? zero + h + 13 : zero - h - 5;
       return `<g data-act="go-day" data-key="${d.key}" class="ch-bar-g">
         <rect class="ch-hit" x="${col * i}" y="0" width="${col}" height="190"/>
-        <rect class="ch-bar ${deficit ? 'good' : 'bad'}" x="${cx - 13}" y="${y}" width="26" height="${h}" rx="6"/>
+        <rect class="ch-bar ${tone(d.balance)}" x="${cx - 13}" y="${y}" width="26" height="${h}" rx="6"/>
         <text class="ch-val" x="${cx}" y="${ty}" text-anchor="middle">${signed(d.balance)}</text></g>${label}`;
     })
     .join('');
-  const ty = zero + (target / maxAbs) * maxH;
+  const ty = zero + ((g.gain ? -target : target) / maxAbs) * maxH;
   return `<svg class="chart" viewBox="0 0 ${W} 190" role="img" aria-label="Bilan calorique par jour de la semaine">
     <line class="ch-zero" x1="0" x2="${W}" y1="${zero}" y2="${zero}"/>
     ${target ? `<line class="ch-target" x1="0" x2="${W}" y1="${ty}" y2="${ty}"/>` : ''}
     ${bars}
-  </svg>${target ? `<small class="chart-note">Pointillés : objectif de −${fmt(target)} kcal / jour</small>` : ''}`;
+  </svg>${target ? `<small class="chart-note">Pointillés : objectif de ${g.gain ? '+' : '−'}${fmt(target)} kcal / jour</small>` : ''}`;
 }
 
 function calendar() {
@@ -270,7 +277,7 @@ function calendar() {
       continue;
     }
     const s = statsFor(k);
-    const cls = !s.logged ? '' : s.balance < 0 ? 'good' : 'bad';
+    const cls = !s.logged ? '' : tone(s.balance);
     const title = s.logged ? `${signed(s.balance)} kcal` : 'non renseigné';
     cells += `<button class="cal-c ${cls} ${k === today ? 'today' : ''}" data-act="go-day" data-key="${k}" aria-label="${dfLong.format(fromKey(k))} : ${title}">${dnum}</button>`;
   }
@@ -323,7 +330,12 @@ function profileFields(p) {
       <label class="field">Taille (cm) <input name="heightCm" type="number" inputmode="numeric" min="100" max="230" required value="${p.heightCm || ''}"></label>
       <label class="field">Poids (kg) <input name="weightKg" type="number" inputmode="decimal" min="30" max="300" step="0.1" required value="${p.weightKg || ''}"></label>
     </div>
-    <label class="field">Objectif de déficit par jour (kcal) <input name="targetDeficit" type="number" inputmode="numeric" min="0" max="1500" step="50" value="${p.targetDeficit || ''}" placeholder="Optionnel, ex. 300"></label>`;
+    <fieldset class="seg" aria-label="Objectif">
+      <label><input type="radio" name="goal" value="loss" ${p.goal !== 'gain' ? 'checked' : ''}><span>Perte de poids</span></label>
+      <label><input type="radio" name="goal" value="gain" ${p.goal === 'gain' ? 'checked' : ''}><span>Prise de masse</span></label>
+    </fieldset>
+    <label class="field">Déficit ou surplus visé par jour (kcal) <input name="targetKcal" type="number" inputmode="numeric" min="0" max="1500" step="50" value="${goalOf(p).kcal || ''}" placeholder="Optionnel, ex. 300"></label>
+    <small class="muted">Perte de poids : calories à manger en moins que ta dépense. Prise de masse : calories à manger en plus.</small>`;
 }
 
 function onboardingView() {
@@ -673,7 +685,8 @@ document.addEventListener('submit', (e) => {
         birthDate: f.birthDate.value,
         heightCm: num(f.heightCm.value),
         weightKg: num(f.weightKg.value),
-        targetDeficit: Math.max(0, Math.round(num(f.targetDeficit.value))),
+        goal: f.goal.value === 'gain' ? 'gain' : 'loss',
+        targetKcal: Math.max(0, Math.round(num(f.targetKcal.value))),
       };
       store.getState().profile = next;
       store.save();
