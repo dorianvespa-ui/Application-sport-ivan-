@@ -2,6 +2,7 @@ import { MEALS, KCAL_PER_KG_FAT, todayKey, addDays, fromKey, weekStart, dayStats
 import * as store from './store.js';
 import { FOODS } from './foods.js';
 import { startScanner, stopScanner, lookupProduct } from './scanner.js';
+import * as sync from './sync.js';
 
 // ---------- Utilitaires ----------
 
@@ -18,7 +19,8 @@ const dfLong = new Intl.DateTimeFormat('fr-FR', { weekday: 'long', day: 'numeric
 const dfShort = new Intl.DateTimeFormat('fr-FR', { day: 'numeric', month: 'short' });
 const dfWeekday = new Intl.DateTimeFormat('fr-FR', { weekday: 'long' });
 
-const ui = { view: 'day', date: todayKey(), week: weekStart(todayKey()) };
+// auth : 'loading' (démarrage), 'out' (écran de connexion), 'in' (app utilisable)
+const ui = { view: 'day', date: todayKey(), week: weekStart(todayKey()), auth: 'loading', authMode: 'signin', synced: false };
 
 const profile = () => store.getState().profile;
 // Objectif : perte de poids (déficit visé) ou prise de masse (surplus visé).
@@ -45,6 +47,19 @@ const ICONS = {
 
 function render() {
   const app = $('#app');
+  if (ui.auth !== 'in') {
+    app.innerHTML = ui.auth === 'out' ? authView() : `<section class="welcome"><img src="icons/icon.svg" alt="" width="72" height="72"><h1>Équilibre</h1><p>Chargement…</p></section>`;
+    return;
+  }
+  if (!profile() && !ui.synced) {
+    // Compte connecté mais données en ligne pas encore lues : ne pas proposer
+    // de recréer un profil, qui écraserait la sauvegarde.
+    const failed = sync.status.state === 'offline';
+    app.innerHTML = `<section class="welcome"><img src="icons/icon.svg" alt="" width="72" height="72"><h1>Équilibre</h1>
+      <p>${failed ? 'Impossible de récupérer tes données. Vérifie ta connexion à internet.' : 'Récupération de tes données…'}</p></section>
+      ${failed ? '<div class="form"><button class="btn" data-act="retry-sync">Réessayer</button><button class="link" data-act="logout">Se déconnecter</button></div>' : ''}`;
+    return;
+  }
   if (!profile()) {
     app.innerHTML = onboardingView();
     return;
@@ -337,6 +352,33 @@ function profileFields(p) {
     <small class="muted">Perte de poids : calories à manger en moins que ta dépense. Prise de masse : calories à manger en plus.</small>`;
 }
 
+function authView() {
+  const signup = ui.authMode === 'signup';
+  return `
+  <section class="welcome">
+    <img src="icons/icon.svg" alt="" width="72" height="72">
+    <h1>Équilibre</h1>
+    <p>${signup ? 'Crée ton compte pour sauvegarder tes données en ligne.' : 'Connecte-toi pour retrouver tes données.'}</p>
+  </section>
+  <form class="card form" data-form="auth">
+    <label class="field">E-mail <input name="email" type="email" autocomplete="email" inputmode="email" autocapitalize="none" required></label>
+    <label class="field">Mot de passe <input name="password" type="password" autocomplete="${signup ? 'new-password' : 'current-password'}" minlength="6" required></label>
+    ${signup ? '<small class="muted">6 caractères minimum.</small>' : ''}
+    <p id="auth-msg" class="error" role="alert" hidden></p>
+    <button class="btn" type="submit">${signup ? 'Créer mon compte' : 'Se connecter'}</button>
+    <button class="link" type="button" data-act="auth-mode">${signup ? "J'ai déjà un compte" : 'Créer un compte'}</button>
+  </form>`;
+}
+
+function syncLabel() {
+  const st = sync.status;
+  if (!sync.currentUser()) return 'Hors ligne : tes changements seront envoyés au retour de la connexion.';
+  if (st.state === 'syncing') return 'Synchronisation…';
+  if (st.state === 'offline') return 'Hors ligne : tes changements seront envoyés au retour de la connexion.';
+  if (st.state === 'ok') return `Synchronisé à ${st.at.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}`;
+  return 'En attente de synchronisation';
+}
+
 function onboardingView() {
   return `
   <section class="welcome">
@@ -371,12 +413,14 @@ function profileView() {
     </ul>
   </section>
   <section class="card">
-    <div class="card-head"><h2>Mes données</h2></div>
-    <p class="muted">Tout est enregistré sur cet appareil uniquement. Exporte une sauvegarde de temps en temps.</p>
+    <div class="card-head"><h2>Compte et données</h2></div>
+    <p class="muted">${sync.currentUser() ? `Connecté : <b>${esc(sync.currentUser().email)}</b><br>` : ''}Tes données sont enregistrées sur cet appareil et sauvegardées en ligne sur ton compte.</p>
+    <p id="sync-status" class="sync-status" role="status">${syncLabel()}</p>
     <div class="btn-row">
       <button class="btn secondary" data-act="export">Exporter</button>
       <label class="btn secondary">Importer<input type="file" accept="application/json,.json" data-change="import" hidden></label>
     </div>
+    <button class="btn secondary wide" data-act="logout">Se déconnecter</button>
     <button class="link danger" data-act="reset">Tout effacer</button>
   </section>`;
 }
@@ -639,8 +683,20 @@ document.addEventListener('click', (e) => {
     case 'export':
       exportData();
       break;
+    case 'auth-mode':
+      ui.authMode = ui.authMode === 'signup' ? 'signin' : 'signup';
+      render();
+      break;
+    case 'logout':
+      logout();
+      break;
+    case 'retry-sync':
+      sync.status.state = 'syncing';
+      render();
+      runSync();
+      break;
     case 'reset':
-      if (confirm('Effacer définitivement toutes les données de cet appareil ?')) {
+      if (confirm('Effacer définitivement toutes tes données, sur cet appareil et en ligne ?')) {
         store.resetState();
         ui.view = 'day';
         render();
@@ -675,6 +731,9 @@ document.addEventListener('submit', (e) => {
   e.preventDefault();
   const f = form.elements;
   switch (form.dataset.form) {
+    case 'auth':
+      submitAuth(form);
+      break;
     case 'profile': {
       const first = !profile();
       const old = profile();
@@ -834,9 +893,124 @@ async function importData(file) {
   }
 }
 
+// ---------- Compte et synchronisation ----------
+
+// Mémorise qu'une première synchronisation a réussi pour ce compte sur cet appareil.
+const SYNCED_KEY = 'equilibre.synced';
+const wasSynced = (userId) => {
+  try {
+    return localStorage.getItem(SYNCED_KEY) === userId;
+  } catch (e) {
+    return false;
+  }
+};
+
+async function runSync() {
+  const result = await sync.sync();
+  if (result !== 'error' && !ui.synced) {
+    ui.synced = true;
+    try {
+      localStorage.setItem(SYNCED_KEY, sync.currentUser().id);
+    } catch (e) {}
+    if (!profile()) return render(), result;
+  } else if (result === 'error' && !ui.synced && ui.auth === 'in') {
+    render();
+  }
+  // Des données plus récentes sont arrivées : on réaffiche, sauf si une saisie est en cours.
+  if (result === 'pulled' && !$('#sheet-root').innerHTML) render();
+  return result;
+}
+
+async function submitAuth(form) {
+  const msg = $('#auth-msg');
+  const btn = $('button[type="submit"]', form);
+  const email = form.email.value.trim();
+  const password = form.password.value;
+  msg.hidden = true;
+  btn.disabled = true;
+  try {
+    const user = ui.authMode === 'signup' ? await sync.signUp(email, password) : await sync.signIn(email, password);
+    if (!user) {
+      // Compte créé, mais l'adresse doit être confirmée par e-mail.
+      ui.authMode = 'signin';
+      render();
+      const m = $('#auth-msg');
+      m.textContent = "Compte créé. Ouvre l'e-mail de confirmation que tu viens de recevoir, puis connecte-toi ici.";
+      m.className = 'scan-msg ok';
+      m.hidden = false;
+      return;
+    }
+    store.setOwner(user.id);
+    ui.synced = wasSynced(user.id);
+    ui.auth = 'in';
+    ui.view = 'day';
+    render();
+    await runSync(); // récupère les données du compte avant de proposer de créer un profil
+  } catch (e) {
+    msg.textContent = e.message;
+    msg.hidden = false;
+    btn.disabled = false;
+  }
+}
+
+async function logout() {
+  if (sync.hasPending() && sync.status.state === 'offline' && !confirm("Tes derniers changements n'ont pas encore été envoyés en ligne et seront perdus. Se déconnecter quand même ?")) return;
+  await sync.flush();
+  await sync.signOut();
+  store.clearLocal();
+  try {
+    localStorage.removeItem(SYNCED_KEY);
+  } catch (e) {}
+  ui.synced = false;
+  ui.auth = 'out';
+  ui.authMode = 'signin';
+  render();
+}
+
+store.setChangeListener(() => sync.schedulePush());
+sync.setStatusListener(() => {
+  const el = $('#sync-status');
+  if (el) el.textContent = syncLabel();
+});
+
+async function boot() {
+  let user = null;
+  try {
+    user = await sync.init();
+  } catch (e) {
+    console.warn(e);
+  }
+  if (user) {
+    store.setOwner(user.id);
+    ui.synced = wasSynced(user.id);
+    ui.auth = 'in';
+    render();
+    runSync();
+  } else if (!navigator.onLine && store.getState().owner) {
+    // Hors ligne avec un compte déjà utilisé sur cet appareil : l'app reste utilisable.
+    ui.synced = wasSynced(store.getState().owner);
+    ui.auth = 'in';
+    render();
+  } else {
+    ui.auth = 'out';
+    render();
+  }
+}
+
+window.addEventListener('online', () => {
+  if (sync.currentUser()) runSync();
+  else if (ui.auth === 'in') boot();
+});
+document.addEventListener('visibilitychange', () => {
+  if (ui.auth !== 'in' || !sync.currentUser()) return;
+  if (document.visibilityState === 'visible') runSync();
+  else sync.flush();
+});
+
 // ---------- Démarrage ----------
 
 render();
+boot();
 
 if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) {
   navigator.serviceWorker.register('sw.js').catch((e) => console.warn(e));

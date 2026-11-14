@@ -14,6 +14,8 @@ let sb = null;
 let user = null;
 let pushTimer = null;
 let busy = null;
+let dirty = false; // des modifications locales attendent d'être envoyées
+export const hasPending = () => dirty;
 
 // state : 'idle' | 'syncing' | 'ok' | 'offline'
 export const status = { state: 'idle', at: null };
@@ -85,6 +87,7 @@ export async function signOut() {
     console.warn(e);
   }
   user = null;
+  dirty = false;
   setStatus('idle');
 }
 
@@ -92,10 +95,13 @@ const hasContent = (s) => Boolean(s.profile) || Object.keys(s.days || {}).length
 
 async function pushNow() {
   const state = store.getState();
+  const sentAt = state.updatedAt || 0;
   const { error } = await client()
     .from(TABLE)
     .upsert({ user_id: user.id, data: state, updated_at: new Date().toISOString() });
   if (error) throw error;
+  // Si une modification est arrivée pendant l'envoi, elle reste à envoyer.
+  if (store.getState() === state && (state.updatedAt || 0) === sentAt) dirty = false;
 }
 
 // Compare la version locale et la version en ligne, garde la plus récente.
@@ -114,6 +120,7 @@ export async function sync() {
       let result = 'same';
       if (row && remoteTs > localTs) {
         store.adoptRemote(row.data, user.id);
+        dirty = false;
         result = 'pulled';
       } else if ((row && localTs > remoteTs) || (!row && hasContent(local))) {
         await pushNow();
@@ -134,16 +141,19 @@ export async function sync() {
 
 // Envoi différé après une modification locale.
 export function schedulePush() {
+  dirty = true;
   if (!user) return;
   clearTimeout(pushTimer);
   pushTimer = setTimeout(flush, 1200);
 }
 
-// Envoi immédiat des modifications en attente.
+// Envoi immédiat des modifications en attente (ne fait rien s'il n'y en a pas,
+// pour ne jamais écraser une version en ligne plus récente avec une copie ancienne).
 export async function flush() {
   clearTimeout(pushTimer);
   if (!user) return;
   if (busy) await busy;
+  if (!dirty) return;
   setStatus('syncing');
   try {
     await pushNow();

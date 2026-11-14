@@ -468,3 +468,9 @@ input:focus-visible, button:focus-visible, .seg input:focus-visible + span {
 @media (prefers-reduced-motion: reduce) {
   * { animation: none !important; transition: none !important; }
 }
+
+/* ---------- Compte ---------- */
+
+.sync-status { font-size: .85rem; font-weight: 600; color: var(--green); margin: 8px 0 12px; }
+.btn.wide { width: 100%; margin-top: 10px; }
+.form .link { align-self: center; }

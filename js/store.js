@@ -1,4 +1,5 @@
-// Stockage local (localStorage) : tout reste sur l'appareil.
+// Stockage local (localStorage). L'appareil garde toujours une copie complète ;
+// js/sync.js la recopie en ligne quand un compte est connecté.
 
 const KEY = 'equilibre.v1';
 
@@ -16,7 +17,7 @@ function load() {
   return empty();
 }
 
-export function save() {
+function persist() {
   try {
     localStorage.setItem(KEY, JSON.stringify(state));
   } catch (e) {
@@ -24,16 +25,51 @@ export function save() {
   }
 }
 
+let onChange = () => {};
+export function setChangeListener(fn) {
+  onChange = fn;
+}
+
+// À appeler après toute modification faite par l'utilisateur :
+// date la version (pour la synchronisation) et prévient l'écouteur.
+export function save() {
+  state.updatedAt = Date.now();
+  persist();
+  onChange();
+}
+
+// Rattache les données locales au compte connecté. Si elles appartenaient
+// à un autre compte, on repart de zéro.
+export function setOwner(userId) {
+  if (state.owner && state.owner !== userId) state = empty();
+  if (state.owner !== userId) {
+    state.owner = userId;
+    persist();
+  }
+}
+
+// Remplace les données locales par la version en ligne (sans la redater).
+export function adoptRemote(data, userId) {
+  state = { ...empty(), ...data, owner: userId };
+  persist();
+}
+
+// Vide l'appareil à la déconnexion (la copie en ligne n'est pas touchée).
+export function clearLocal() {
+  state = empty();
+  persist();
+}
+
 export const getState = () => state;
 
 export function replaceState(next) {
   if (!next || typeof next !== 'object' || !next.days) throw new Error('Fichier invalide');
-  state = { ...empty(), ...next };
+  state = { ...empty(), ...next, owner: state.owner };
   save();
 }
 
 export function resetState() {
-  state = empty();
+  state = { ...empty(), owner: state.owner };
   save();
 }
 
