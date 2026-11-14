@@ -73,6 +73,11 @@ export async function signIn(email, password) {
 export async function signUp(email, password) {
   const { data, error } = await client().auth.signUp({ email, password });
   if (error) throw new Error(translate(error));
+  // Adresse déjà inscrite : Supabase ne renvoie pas d'erreur (pour ne pas révéler
+  // les comptes existants) mais un utilisateur sans identité, et n'envoie aucun e-mail.
+  if (!data.session && data.user && Array.isArray(data.user.identities) && data.user.identities.length === 0) {
+    throw new Error('Un compte existe déjà avec cet e-mail. Connecte-toi.');
+  }
   // Sans session, Supabase attend la confirmation de l'adresse e-mail.
   if (!data.session) return null;
   user = data.user;
