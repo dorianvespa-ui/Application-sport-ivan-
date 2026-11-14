@@ -474,3 +474,14 @@ input:focus-visible, button:focus-visible, .seg input:focus-visible + span {
 .sync-status { font-size: .85rem; font-weight: 600; color: var(--green); margin: 8px 0 12px; }
 .btn.wide { width: 100%; margin-top: 10px; }
 .form .link { align-self: center; }
+
+/* Champ date sur iPhone : Safari le centre et le laisse dépasser de la carte. */
+.field input[type="date"] {
+  -webkit-appearance: none;
+  appearance: none;
+  display: block;
+  max-width: 100%;
+  min-height: 49px;
+  text-align: left;
+}
+.field input[type="date"]::-webkit-date-and-time-value { text-align: left; margin: 0; }
