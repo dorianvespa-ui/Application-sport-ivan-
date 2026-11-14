@@ -372,10 +372,18 @@ input:focus-visible, button:focus-visible, .seg input:focus-visible + span {
 .scan-msg.ok { background: var(--green-soft); color: var(--green); }
 .scan-msg.warn { background: var(--coral-soft); color: var(--coral); }
 #scan-zone { display: flex; flex-direction: column; gap: 10px; }
-#reader { border-radius: 16px; overflow: hidden; background: #000; }
-/* Pas de display:none ici : la bibliothèque de scan mesure la largeur de #reader
-   au démarrage, et une largeur nulle donnait une vidéo invisible. */
-#reader video { display: block; width: 100% !important; height: auto; }
+#reader { position: relative; border-radius: 16px; overflow: hidden; background: #000; }
+#reader:not(:empty) { aspect-ratio: 4 / 3; }
+#reader video { display: block; width: 100%; height: 100%; object-fit: cover; }
+/* Cadre de visée : simple repère, toute l'image est analysée. */
+.scan-frame {
+  position: absolute;
+  inset: 24% 9%;
+  border: 3px solid rgba(255, 255, 255, .92);
+  border-radius: 14px;
+  box-shadow: 0 0 0 999px rgba(0, 0, 0, .32);
+  pointer-events: none;
+}
 
 .notes { margin: 4px 0 0; padding-left: 18px; color: var(--muted); font-size: .9rem; display: grid; gap: 6px; }
 .notes b { color: var(--ink); }

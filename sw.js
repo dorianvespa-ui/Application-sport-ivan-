@@ -1,9 +1,9 @@
 // Service worker : réseau d'abord, cache en secours (l'app s'ouvre hors ligne).
-const CACHE = 'equilibre-v2';
+const CACHE = 'equilibre-v3';
 const SHELL = [
   './', 'index.html', 'css/style.css', 'manifest.webmanifest',
   'js/app.js', 'js/calc.js', 'js/store.js', 'js/foods.js', 'js/scanner.js', 'js/sync.js',
-  'vendor/html5-qrcode.min.js', 'vendor/supabase.js', 'icons/icon.svg', 'icons/icon-192.png',
+  'vendor/zxing-reader.js', 'vendor/zxing_reader.wasm', 'vendor/supabase.js', 'icons/icon.svg', 'icons/icon-192.png',
 ];
 
 self.addEventListener('install', (e) => {

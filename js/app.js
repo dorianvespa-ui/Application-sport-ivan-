@@ -566,7 +566,7 @@ async function handleCode(code) {
 async function startScan() {
   const zone = $('#scan-zone');
   zone.hidden = false;
-  scanMsg('Vise le code-barres du produit.');
+  scanMsg('Place le code-barres dans le cadre, à 20–30 cm, bien net. La lecture est automatique.');
   try {
     await startScanner('reader', handleCode);
   } catch (e) {

@@ -1,57 +1,112 @@
-// Scan de code-barres (bibliothèque html5-qrcode, chargée à la demande)
-// et recherche du produit dans Open Food Facts.
+// Scan de code-barres : aperçu de la caméra arrière et lecture automatique
+// (décodeur ZXing-C++ en WebAssembly, chargé à la demande), puis recherche
+// du produit dans Open Food Facts.
+
+const FORMATS = ['EAN13', 'EAN8', 'UPCA', 'UPCE'];
+const MAX_SIDE = 1600; // taille maximale de l'image analysée
+const BOX_RATIO = 4 / 3; // proportions de l'aperçu affiché (voir #reader dans le CSS)
+const INTERVAL = 120; // pause entre deux analyses (ms)
 
 let libPromise = null;
-let scanner = null;
+let session = null; // { stream, timer, host }
 
 function loadLib() {
   if (!libPromise) {
     libPromise = new Promise((resolve, reject) => {
       const s = document.createElement('script');
-      s.src = 'vendor/html5-qrcode.min.js';
+      s.src = 'vendor/zxing-reader.js';
       s.onload = resolve;
-      s.onerror = () => {
-        libPromise = null;
-        reject(new Error('Chargement du scanner impossible'));
-      };
+      s.onerror = () => reject(new Error('Chargement du lecteur impossible'));
       document.head.appendChild(s);
-    });
+    })
+      .then(() =>
+        window.ZXingWASM.prepareZXingModule({
+          overrides: {
+            locateFile: (path, prefix) =>
+              path.endsWith('.wasm') ? new URL('vendor/zxing_reader.wasm', document.baseURI).href : prefix + path,
+          },
+          fireImmediately: true,
+        })
+      )
+      .catch((e) => {
+        libPromise = null;
+        throw e;
+      });
   }
   return libPromise;
 }
 
-export async function startScanner(elementId, onCode) {
+// Cherche un code-barres produit dans une image (ImageData). Renvoie le code ou null.
+export async function decode(imageData) {
   await loadLib();
+  const results = await window.ZXingWASM.readBarcodes(imageData, { formats: FORMATS, tryHarder: true, maxNumberOfSymbols: 1 });
+  const hit = results.find((r) => /^\d{8,14}$/.test(r.text || ''));
+  return hit ? hit.text : null;
+}
+
+export async function startScanner(elementId, onCode) {
   await stopScanner();
-  const F = window.Html5QrcodeSupportedFormats;
-  scanner = new window.Html5Qrcode(elementId, {
-    formatsToSupport: [F.EAN_13, F.EAN_8, F.UPC_A, F.UPC_E],
-    experimentalFeatures: { useBarCodeDetectorIfSupported: true },
-    verbose: false,
+  const host = document.getElementById(elementId);
+  const lib = loadLib(); // en parallèle de l'ouverture de la caméra
+  lib.catch(() => {});
+  const stream = await navigator.mediaDevices.getUserMedia({
+    audio: false,
+    video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } },
   });
-  let done = false;
-  await scanner.start(
-    { facingMode: 'environment' },
-    { fps: 10, qrbox: (w, h) => ({ width: Math.round(w * 0.85), height: Math.round(Math.min(h * 0.6, 160)) }) },
-    (code) => {
-      if (done) return;
-      done = true;
-      onCode(code);
-    },
-    () => {}
-  );
+  const me = (session = { stream, timer: null, host });
+  // Mise au point continue et léger zoom quand l'appareil le permet (ignoré sinon).
+  // Le zoom incite à tenir le produit plus loin, là où la caméra fait le point.
+  const track = stream.getVideoTracks()[0];
+  const caps = track?.getCapabilities?.() || {};
+  const advanced = [];
+  if (caps.focusMode?.includes?.('continuous')) advanced.push({ focusMode: 'continuous' });
+  if (caps.zoom?.max >= 2) advanced.push({ zoom: 2 });
+  if (advanced.length) track.applyConstraints({ advanced }).catch(() => {});
+
+  host.innerHTML = '<video playsinline muted autoplay></video><div class="scan-frame" aria-hidden="true"></div>';
+  const video = host.querySelector('video');
+  video.srcObject = stream;
+  await video.play().catch(() => {});
+  await lib;
+  if (session !== me) return; // fermé entre-temps
+
+  const canvas = document.createElement('canvas');
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  const tick = async () => {
+    if (session !== me) return;
+    const vw = video.videoWidth, vh = video.videoHeight;
+    if (vw && vh) {
+      // On n'analyse que la partie de l'image visible dans l'aperçu (recadrage
+      // centré, comme object-fit: cover) : plus rapide, et conforme à ce qu'on voit.
+      const sw = vw / vh > BOX_RATIO ? vh * BOX_RATIO : vw;
+      const sh = vw / vh > BOX_RATIO ? vh : vw / BOX_RATIO;
+      const k = Math.min(1, MAX_SIDE / Math.max(sw, sh));
+      canvas.width = Math.round(sw * k);
+      canvas.height = Math.round(sh * k);
+      ctx.drawImage(video, (vw - sw) / 2, (vh - sh) / 2, sw, sh, 0, 0, canvas.width, canvas.height);
+      try {
+        const code = await decode(ctx.getImageData(0, 0, canvas.width, canvas.height));
+        if (code && session === me) {
+          navigator.vibrate?.(60);
+          onCode(code);
+          return;
+        }
+      } catch (e) {
+        console.warn(e);
+      }
+    }
+    if (session === me) me.timer = setTimeout(tick, INTERVAL);
+  };
+  tick();
 }
 
 export async function stopScanner() {
-  if (!scanner) return;
-  const s = scanner;
-  scanner = null;
-  try {
-    if (s.isScanning) await s.stop();
-    s.clear();
-  } catch (e) {
-    console.warn(e);
-  }
+  if (!session) return;
+  const s = session;
+  session = null;
+  clearTimeout(s.timer);
+  s.stream.getTracks().forEach((t) => t.stop());
+  s.host.innerHTML = '';
 }
 
 // Renvoie { name, kcal100, portion } ou lève une erreur lisible.
