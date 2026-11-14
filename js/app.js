@@ -106,12 +106,11 @@ function dayView() {
     ${day.workouts
       .map(
         (w) => `
-    <div class="row">
+    <div class="swipe"><div class="row swipe-content">
       <span class="row-ic">🏋️</span>
       <div class="row-main"><b>${esc(w.name)}</b><small>${[w.minutes ? `${fmt(w.minutes)} min` : '', w.steps ? `${fmt(w.steps)} pas` : ''].filter(Boolean).join(' · ') || 'Séance'}</small></div>
       <span class="row-val">${fmt(w.kcal)}</span>
-      <button class="del" data-act="del-workout" data-id="${w.id}" aria-label="Supprimer ${esc(w.name)}">×</button>
-    </div>`
+    </div><button class="swipe-del" data-act="del-workout" data-id="${w.id}" aria-label="Supprimer ${esc(w.name)}">Supprimer</button></div>`
       )
       .join('')}
     <button class="add" data-act="open-workout">+ Ajouter une séance de sport</button>
@@ -119,6 +118,7 @@ function dayView() {
 
   <div class="section-title"><h2>Repas</h2><strong>${fmt(s.eaten)} kcal</strong></div>
   ${MEALS.map((m) => mealCard(m, day, s, key)).join('')}
+  ${day.workouts.length || s.eaten > 0 ? '<p class="hint">Astuce : glisse une ligne vers la gauche pour la supprimer.</p>' : ''}
   `;
 }
 
@@ -170,11 +170,10 @@ function mealCard(m, day, s, key) {
     ${items
       .map(
         (it) => `
-    <div class="row">
+    <div class="swipe"><div class="row swipe-content">
       <div class="row-main"><b>${esc(it.name)}</b>${it.qty ? `<small>${fmt(it.qty)} g · ${fmt(it.kcal100)} kcal/100 g</small>` : ''}</div>
       <span class="row-val">${fmt(it.kcal)}</span>
-      <button class="del" data-act="del-food" data-meal="${m.id}" data-id="${it.id}" aria-label="Supprimer ${esc(it.name)}">×</button>
-    </div>`
+    </div><button class="swipe-del" data-act="del-food" data-meal="${m.id}" data-id="${it.id}" aria-label="Supprimer ${esc(it.name)}">Supprimer</button></div>`
       )
       .join('')}
     <div class="meal-actions">
@@ -306,8 +305,8 @@ function weightBlock() {
     .slice(-5)
     .reverse()
     .map(
-      (w) => `<div class="row"><div class="row-main"><b>${kg(w.kg)}</b><small>${dfLong.format(fromKey(w.date))}</small></div>
-      <button class="del" data-act="del-weight" data-date="${w.date}" aria-label="Supprimer la pesée">×</button></div>`
+      (w) => `<div class="swipe"><div class="row swipe-content"><div class="row-main"><b>${kg(w.kg)}</b><small>${dfLong.format(fromKey(w.date))}</small></div></div>
+      <button class="swipe-del" data-act="del-weight" data-date="${w.date}" aria-label="Supprimer la pesée du ${dfLong.format(fromKey(w.date))}">Supprimer</button></div>`
     )
     .join('');
   return `${chart}${ws.length >= 2 ? `<p class="muted">${diff === 0 ? 'Poids stable' : `${diff > 0 ? '+' : '−'}${Math.abs(diff).toFixed(1).replace('.', ',')} kg`} depuis le ${dfShort.format(fromKey(ws[0].date))}</p>` : ''}${list}`;
@@ -736,6 +735,74 @@ document.addEventListener('submit', (e) => {
       render();
       toast('Pesée enregistrée');
       break;
+  }
+});
+
+// ---------- Glisser vers la gauche pour supprimer ----------
+
+const SWIPE_W = 104; // largeur du bouton « Supprimer »
+let drag = null;
+let swallowClick = false;
+
+function closeSwipes(except) {
+  document.querySelectorAll('.swipe.open').forEach((el) => {
+    if (el !== except) el.classList.remove('open');
+  });
+}
+
+document.addEventListener('pointerdown', (e) => {
+  const content = e.target.closest('.swipe-content');
+  const wrap = e.target.closest('.swipe');
+  closeSwipes(wrap);
+  if (!content || (e.pointerType === 'mouse' && e.button !== 0)) return;
+  drag = { wrap, content, x0: e.clientX, y0: e.clientY, base: wrap.classList.contains('open') ? -SWIPE_W : 0, x: 0, active: false };
+});
+
+document.addEventListener('pointermove', (e) => {
+  if (!drag) return;
+  const dx = e.clientX - drag.x0;
+  const dy = e.clientY - drag.y0;
+  if (!drag.active) {
+    if (Math.abs(dy) > 10 && Math.abs(dy) > Math.abs(dx)) return void (drag = null); // défilement vertical
+    if (Math.abs(dx) < 8) return;
+    drag.active = true;
+    drag.content.style.transition = 'none';
+  }
+  drag.x = Math.max(-SWIPE_W - 24, Math.min(0, drag.base + dx));
+  drag.content.style.transform = `translateX(${drag.x}px)`;
+});
+
+function endDrag() {
+  if (!drag) return;
+  const d = drag;
+  drag = null;
+  if (!d.active) {
+    // Simple appui sur une ligne ouverte : on la referme.
+    d.wrap.classList.remove('open');
+    return;
+  }
+  d.content.style.transition = '';
+  d.content.style.transform = '';
+  d.wrap.classList.toggle('open', d.x < -SWIPE_W / 2);
+  swallowClick = true;
+  setTimeout(() => (swallowClick = false), 50);
+}
+document.addEventListener('pointerup', endDrag);
+document.addEventListener('pointercancel', endDrag);
+
+// Le clic qui suit un glissement ne doit rien déclencher.
+document.addEventListener('click', (e) => {
+  if (!swallowClick) return;
+  swallowClick = false;
+  e.stopPropagation();
+  e.preventDefault();
+}, true);
+
+// Au clavier : le bouton « Supprimer » se dévoile quand il reçoit le focus.
+document.addEventListener('focusin', (e) => {
+  if (e.target.classList?.contains('swipe-del')) {
+    closeSwipes();
+    e.target.closest('.swipe').classList.add('open');
   }
 });
 

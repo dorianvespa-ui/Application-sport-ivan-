@@ -180,19 +180,33 @@ button { cursor: pointer; }
   font-weight: 600;
 }
 
-.del {
-  width: 32px;
-  height: 32px;
-  flex: none;
-  border: 0;
-  border-radius: 50%;
-  background: transparent;
-  color: var(--muted);
-  font-size: 1.25rem;
-  line-height: 1;
-  margin-right: -6px;
+.swipe { position: relative; overflow: hidden; border-top: 1px solid var(--line); }
+.card-head + .swipe { border-top: 0; }
+.swipe .row { border-top: 0; }
+.swipe-content {
+  position: relative;
+  z-index: 1;
+  background: var(--surface);
+  transition: transform .22s ease;
+  touch-action: pan-y;
+  user-select: none;
+  -webkit-user-select: none;
 }
-.del:hover { background: var(--coral-soft); color: var(--coral); }
+.swipe.open .swipe-content { transform: translateX(-104px); }
+.swipe-del {
+  position: absolute;
+  top: 6px;
+  bottom: 6px;
+  right: 0;
+  width: 96px;
+  border: 0;
+  border-radius: 12px;
+  background: #c8452b;
+  color: #fff;
+  font-weight: 700;
+  font-size: .9rem;
+}
+.hint { text-align: center; color: var(--muted); font-size: .82rem; padding: 4px 0 8px; }
 
 .add {
   border: 0;
