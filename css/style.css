@@ -373,8 +373,9 @@ input:focus-visible, button:focus-visible, .seg input:focus-visible + span {
 .scan-msg.warn { background: var(--coral-soft); color: var(--coral); }
 #scan-zone { display: flex; flex-direction: column; gap: 10px; }
 #reader { border-radius: 16px; overflow: hidden; background: #000; }
-#reader:empty { display: none; }
-#reader video { display: block; }
+/* Pas de display:none ici : la bibliothèque de scan mesure la largeur de #reader
+   au démarrage, et une largeur nulle donnait une vidéo invisible. */
+#reader video { display: block; width: 100% !important; height: auto; }
 
 .notes { margin: 4px 0 0; padding-left: 18px; color: var(--muted); font-size: .9rem; display: grid; gap: 6px; }
 .notes b { color: var(--ink); }
