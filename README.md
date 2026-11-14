@@ -10,7 +10,7 @@ Application web (PWA) de suivi calorique : calories dépensées (métabolisme de
 - Bilan : déficit ou surplus par jour, totaux et moyennes par semaine, calendrier, suivi du poids
 - Compte par e-mail et mot de passe (Supabase) : les données sont gardées sur l'appareil et sauvegardées en ligne, une ligne par utilisateur dans la table `equilibre_data`
 - Export / import en JSON
-- À venir : estimation des calories à partir d'une photo du plat
+- Estimation des calories et nutriments à partir d'une photo du plat et d'une description facultative (API Claude, via la fonction serveur `supabase/functions/equilibre-analyze` ; la clé reste dans les secrets Supabase)
 
 ## Lancer en local
 

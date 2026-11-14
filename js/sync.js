@@ -168,3 +168,34 @@ export async function flush() {
     setStatus('offline');
   }
 }
+
+// ---------- Analyse de photo par IA (fonction serveur) ----------
+
+// Envoie une photo (base64, sans préfixe) et une description facultative.
+// Renvoie l'estimation, ou lève une erreur avec un message lisible.
+export async function analyzePhoto({ image, mediaType, description }) {
+  if (!user) throw new Error("Connecte-toi à internet pour utiliser l'analyse photo.");
+  const { data, error } = await client().functions.invoke('equilibre-analyze', {
+    body: { image, media_type: mediaType, description },
+  });
+  if (error) {
+    // Erreur renvoyée par la fonction : son message est dans le corps de la réponse.
+    let message = '';
+    try {
+      message = (await error.context?.json?.())?.error || '';
+    } catch (e) {}
+    throw new Error(message || (navigator.onLine ? "L'analyse a échoué. Réessaie." : 'Pas de connexion à internet.'));
+  }
+  return data;
+}
+
+// Nombre d'analyses et coût estimé depuis le début du mois.
+export async function aiUsageThisMonth() {
+  if (!user) return null;
+  const start = new Date();
+  start.setDate(1);
+  start.setHours(0, 0, 0, 0);
+  const { data, error } = await client().from('equilibre_ai_usage').select('cost_usd').gte('created_at', start.toISOString());
+  if (error) return null;
+  return { count: data.length, cost: data.reduce((t, r) => t + Number(r.cost_usd || 0), 0) };
+}

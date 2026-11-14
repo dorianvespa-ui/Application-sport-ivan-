@@ -472,6 +472,7 @@ function profileView() {
     <div class="card-head"><h2>Compte et données</h2></div>
     <p class="muted">${sync.currentUser() ? `Connecté : <b>${esc(sync.currentUser().email)}</b><br>` : ''}Tes données sont enregistrées sur cet appareil et sauvegardées en ligne sur ton compte.</p>
     <p id="sync-status" class="sync-status" role="status">${syncLabel()}</p>
+    <p id="ai-usage" class="muted"></p>
     <div class="btn-row">
       <button class="btn secondary" data-act="export">Exporter</button>
       <label class="btn secondary">Importer<input type="file" accept="application/json,.json" data-change="import" hidden></label>
@@ -508,9 +509,16 @@ function openFoodSheet(mealId) {
       <div class="btn-row three">
         <button type="button" class="btn secondary stack" data-act="scan"><span aria-hidden="true">▮▯▮</span>Scanner</button>
         <button type="button" class="btn secondary stack" data-act="history" aria-expanded="false" aria-controls="history"><span aria-hidden="true">↺</span>Historique</button>
-        <button type="button" class="btn secondary stack" disabled><span aria-hidden="true">📷</span>Photo (bientôt)</button>
+        <label class="btn secondary stack"><span aria-hidden="true">📷</span>Photo<input type="file" accept="image/*" data-change="photo" hidden></label>
       </div>
       <div id="history" class="history" hidden></div>
+      <div id="photo-zone" class="photo-zone" hidden>
+        <img id="photo-preview" alt="Photo du plat à analyser">
+        <label class="field">Description du plat <small>(optionnel, mais rend l'estimation bien plus précise)</small>
+          <textarea id="photo-desc" rows="3" maxlength="600" placeholder="Ex. 200 g de riz, blanc de poulet cuit à l'huile d'olive, sauce au yaourt"></textarea></label>
+        <button type="button" class="btn" data-act="analyze">Analyser la photo</button>
+      </div>
+      <div id="photo-result" class="photo-result" hidden></div>
       <div id="scan-zone" hidden>
         <div id="reader"></div>
         <div class="inline">
@@ -614,6 +622,7 @@ function toggleHistory(force) {
   if (open) {
     stopScanner();
     $('#scan-zone').hidden = true;
+    $('#photo-zone').hidden = true;
     scanMsg('');
     historyItems = store.recentFoods(40);
     panel.innerHTML = historyItems.length
@@ -677,9 +686,90 @@ async function handleCode(code) {
   }
 }
 
+// ---------- Analyse d'une photo par IA ----------
+
+const PHOTO_MAX_SIDE = 1568; // au-delà, l'IA réduit l'image de toute façon
+let photo = null; // { image (base64), mediaType }
+
+// Réduit la photo et la convertit en JPEG (les photos de téléphone sont lourdes).
+async function preparePhoto(file) {
+  const url = URL.createObjectURL(file);
+  try {
+    const img = new Image();
+    img.src = url;
+    await img.decode();
+    const k = Math.min(1, PHOTO_MAX_SIDE / Math.max(img.naturalWidth, img.naturalHeight));
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.round(img.naturalWidth * k);
+    canvas.height = Math.round(img.naturalHeight * k);
+    canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
+    const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+    return { dataUrl, image: dataUrl.slice(dataUrl.indexOf(',') + 1), mediaType: 'image/jpeg' };
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
+async function pickPhoto(file) {
+  if (!file || !$('#photo-zone')) return;
+  await stopScanner();
+  toggleHistory(false);
+  $('#scan-zone').hidden = true;
+  $('#photo-result').hidden = true;
+  try {
+    const p = await preparePhoto(file);
+    photo = { image: p.image, mediaType: p.mediaType };
+    $('#photo-preview').src = p.dataUrl;
+    $('#photo-zone').hidden = false;
+    scanMsg('Ajoute une description si tu peux, puis lance l\'analyse.');
+  } catch (e) {
+    console.warn(e);
+    photo = null;
+    scanMsg("Cette image ne peut pas être lue. Essaie avec une autre photo.", 'warn');
+  }
+}
+
+const CONFIDENCE = { high: 'Confiance : bonne', medium: 'Confiance : moyenne', low: 'Confiance : faible' };
+
+async function analyzePhoto() {
+  if (!photo) return;
+  const btn = $('[data-act="analyze"]');
+  btn.disabled = true;
+  btn.textContent = 'Analyse en cours…';
+  scanMsg("L'IA regarde ta photo. Cela prend 10 à 30 secondes.");
+  try {
+    const r = await sync.analyzePhoto({ ...photo, description: $('#photo-desc').value.trim() });
+    const form = $('[data-form="food"]');
+    if (!form) return; // fenêtre fermée entre-temps
+    if (!r.is_food) {
+      scanMsg(r.note || "Aucun aliment reconnu sur cette photo.", 'warn');
+      return;
+    }
+    fillFood(form, { name: r.dish, kcal: r.total.kcal, macros: { protein: r.total.protein, carbs: r.total.carbs, fiber: r.total.fiber } });
+    $('#photo-zone').hidden = true;
+    const result = $('#photo-result');
+    result.innerHTML = `
+      <div class="card-head"><h3>Détail de l'estimation</h3><small class="muted">${CONFIDENCE[r.confidence] || ''}</small></div>
+      ${r.items.map((it) => `<div class="result-item"><span><b>${esc(it.name)}</b><small>${fmt(it.grams)} g · ${macroLine(it)}</small></span><span class="row-val">${fmt(it.kcal)}<small>kcal</small></span></div>`).join('')}
+      ${r.note ? `<p class="muted">${esc(r.note)}</p>` : ''}
+      <small class="muted">Coût de cette analyse : ≈ ${r.cost_usd.toFixed(3).replace('.', ',')} $</small>`;
+    result.hidden = false;
+    scanMsg('Estimation faite. Vérifie et corrige les valeurs ci-dessous avant d\'ajouter.', 'ok');
+  } catch (e) {
+    scanMsg(e.message, 'warn');
+  } finally {
+    const b = $('[data-act="analyze"]');
+    if (b) {
+      b.disabled = false;
+      b.textContent = 'Analyser la photo';
+    }
+  }
+}
+
 async function startScan() {
   const zone = $('#scan-zone');
   toggleHistory(false);
+  $('#photo-zone').hidden = true;
   zone.hidden = false;
   scanMsg('Place le code-barres dans le cadre, à 20–30 cm, bien net. La lecture est automatique.');
   try {
@@ -727,6 +817,7 @@ document.addEventListener('click', (e) => {
     case 'tab':
       ui.view = d.view;
       render();
+      if (d.view === 'profile') showAiUsage();
       window.scrollTo(0, 0);
       break;
     case 'day-shift': {
@@ -773,6 +864,9 @@ document.addEventListener('click', (e) => {
       break;
     case 'history':
       toggleHistory();
+      break;
+    case 'analyze':
+      analyzePhoto();
       break;
     case 'pick-history':
       fillFood(el.closest('form'), historyItems[Number(d.i)]);
@@ -844,6 +938,9 @@ document.addEventListener('change', (e) => {
     render();
   } else if (kind === 'import') {
     importData(e.target.files[0]);
+  } else if (kind === 'photo') {
+    pickPhoto(e.target.files[0]);
+    e.target.value = ''; // permet de reprendre la même photo
   }
 });
 
@@ -1028,6 +1125,16 @@ const wasSynced = (userId) => {
     return false;
   }
 };
+
+// Affiche dans le Profil le nombre d'analyses photo du mois et leur coût estimé.
+async function showAiUsage() {
+  const u = await sync.aiUsageThisMonth();
+  const el = $('#ai-usage');
+  if (!el || !u) return;
+  el.innerHTML = u.count
+    ? `Analyses photo ce mois-ci : <b>${u.count}</b>, soit environ <b>${u.cost.toFixed(2).replace('.', ',')} $</b>.`
+    : 'Aucune analyse photo ce mois-ci.';
+}
 
 async function runSync() {
   const result = await sync.sync();
