@@ -1,4 +1,4 @@
-import { MEALS, MACROS, KCAL_PER_KG_FAT, todayKey, addDays, fromKey, weekStart, dayStats, bmr, ageAt } from './calc.js';
+import { MEALS, MACROS, KCAL_PER_KG_FAT, todayKey, addDays, fromKey, weekStart, dayStats, bmr, ageAt , calibrate, daysBetween, CALIBRATION } from './calc.js';
 import * as store from './store.js';
 import { FOODS } from './foods.js';
 import { startScanner, stopScanner, lookupProduct } from './scanner.js';
@@ -108,6 +108,7 @@ function dayView() {
   </header>
 
   ${heroCard(s, p)}
+  ${isToday ? weighInReminder() : ''}
   ${nutritionCard(s.macros, p, s.logged)}
 
   <section class="card">
@@ -117,6 +118,15 @@ function dayView() {
       <div class="row-main"><b>Métabolisme de base</b><small>Au repos, pour ${kg(s.weightKg)}</small></div>
       <span class="row-val">${fmt(s.bmrKcal)}</span>
     </div>
+    ${
+      Math.round(s.calibrationKcal)
+        ? `<div class="row">
+      <span class="row-ic">⚖️</span>
+      <div class="row-main"><b>Calibrage personnel</b><small>${signed((p.calibration - 1) * 100)} % d'après tes pesées</small></div>
+      <span class="row-val">${signed(s.calibrationKcal)}</span>
+    </div>`
+        : ''
+    }
     <div class="row">
       <span class="row-ic">👟</span>
       <div class="row-main">
@@ -181,6 +191,21 @@ function heroCard(s, p) {
       </dl>
       ${goal ? `<p class="goal">${goal}</p>` : ''}
     </div>
+  </section>`;
+}
+
+// Rappel de pesée : affiché quand la dernière pesée a une semaine ou plus.
+const WEIGH_IN_EVERY = 7;
+function weighInReminder() {
+  const ws = store.getState().weights;
+  const last = ws.length ? ws[ws.length - 1].date : null;
+  const age = last ? daysBetween(last, todayKey()) : null;
+  if (age !== null && age < WEIGH_IN_EVERY) return '';
+  return `
+  <section class="card reminder">
+    <span class="row-ic" aria-hidden="true">⚖️</span>
+    <div class="row-main"><b>C'est le moment de te peser</b><small>${age === null ? 'Aucune pesée enregistrée.' : `Ta dernière pesée date de ${age} jours.`} Une pesée par semaine permet de calibrer ta dépense réelle.</small></div>
+    <button class="btn small" data-act="open-weight">Me peser</button>
   </section>`;
 }
 
@@ -281,7 +306,9 @@ function statsView() {
   <section class="card">
     <div class="card-head"><h2>Poids</h2><button class="link" data-act="open-weight">+ Pesée</button></div>
     ${weightBlock()}
-  </section>`;
+  </section>
+
+  ${calibrationCard()}`;
 }
 
 // Moyennes de nutriments sur les jours renseignés de la semaine.
@@ -299,6 +326,50 @@ function weekNutrition(days) {
     </div>
     ${goal ? `<p class="muted">Objectif de ${fmt(goal)} g de protéines atteint <b>${hit} jour${hit > 1 ? 's' : ''} sur ${n}</b>.</p>` : ''}
     ${missing ? `<small class="nutri-note">${missing} aliment${missing > 1 ? 's' : ''} sans nutriments renseignés cette semaine : moyennes sous-estimées.</small>` : ''}
+  </section>`;
+}
+
+// Calibrage : dépense réelle déduite des repas saisis et de l'évolution du poids.
+function calibrationCard() {
+  const p = profile();
+  const c = calibrate(store.getState().weights, statsFor, todayKey());
+  const applied = p.calibration && p.calibration !== 1;
+  const pct = (f) => `${signed((f - 1) * 100)} %`;
+  let body;
+  if (!c.ready) {
+    const need = Math.ceil(CALIBRATION.minCoverage * Math.max(c.span, CALIBRATION.minSpanDays));
+    body = `
+      <p class="muted">L'app compare ce que tu manges à l'évolution réelle de ton poids pour mesurer ta vraie dépense, au lieu de l'estimer par une formule.</p>
+      <ul class="checks">
+        <li class="${c.weighIns >= 2 && c.span >= CALIBRATION.minSpanDays ? 'ok' : ''}">Au moins 2 pesées espacées de ${CALIBRATION.minSpanDays} jours <small>(${c.weighIns} pesée${c.weighIns > 1 ? 's' : ''} sur ${c.span} jour${c.span > 1 ? 's' : ''})</small></li>
+        <li class="${c.span >= CALIBRATION.minSpanDays && c.logged >= need ? 'ok' : ''}">Repas saisis au moins 8 jours sur 10 entre ces pesées <small>(${c.logged} jour${c.logged > 1 ? 's' : ''} sur ${c.days})</small></li>
+      </ul>`;
+  } else {
+    const capped = Math.min(1 + CALIBRATION.maxCorrection, Math.max(1 - CALIBRATION.maxCorrection, c.factor));
+    const small = Math.abs(c.factor - 1) < 0.03;
+    const same = applied && Math.abs(capped - p.calibration) < 0.005;
+    body = `
+      <div class="nutri-row">
+        <div><small>Dépense constatée</small><b>${fmt(c.observed)}</b></div>
+        <div><small>Estimation</small><b>${fmt(c.estimated)}</b></div>
+        <div><small>Écart</small><b>${pct(c.factor)}</b></div>
+      </div>
+      <p class="muted">Sur ${c.span} jours (${c.logged} saisis) : ${fmt(c.intake)} kcal mangées par jour en moyenne, poids ${c.deltaKg > 0 ? '+' : '−'}${Math.abs(c.deltaKg).toFixed(1).replace('.', ',')} kg d'après ${c.weighIns} pesées.</p>
+      <p class="muted">${
+        small
+          ? "L'estimation de l'app colle à tes pesées : aucune correction nécessaire."
+          : capped !== c.factor
+            ? `Cet écart est trop grand pour être crédible (au-delà de ${Math.round(CALIBRATION.maxCorrection * 100)} %), donc aucune correction n'est proposée. Vérifie que tous tes repas et tes pesées sont bien saisis.`
+            : `Ta dépense réelle semble ${c.factor > 1 ? 'plus élevée' : 'plus basse'} que l'estimation.`
+      }</p>
+      ${small || same || capped !== c.factor ? '' : `<button class="btn wide" data-act="apply-calibration" data-factor="${capped.toFixed(4)}">Appliquer la correction de ${pct(capped)}</button>`}`;
+  }
+  return `
+  <section class="card">
+    <div class="card-head"><h2>Calibrage</h2>${applied ? `<small class="pill-soft">Correction ${pct(p.calibration)}</small>` : ''}</div>
+    ${body}
+    ${applied ? '<button class="link danger" data-act="clear-calibration">Retirer la correction</button>' : ''}
+    <small class="nutri-note">Le poids varie de 1 à 2 kg d'un jour à l'autre (eau, digestion) : pèse-toi le matin à jeun, et fie-toi au calibrage sur plusieurs semaines.</small>
   </section>`;
 }
 
@@ -463,6 +534,7 @@ function profileView() {
     <ul class="notes">
       <li><b>Métabolisme de base</b> : formule de Mifflin-St Jeor (sexe, âge, taille, poids).</li>
       <li><b>Pas</b> : distance estimée d'après ta taille, puis environ 0,5 kcal par kg et par km.</li>
+      <li><b>Calibrage</b> : dans l'onglet Bilan, ta dépense réelle est déduite de tes repas et de tes pesées, à raison de 7 700 kcal par kg.</li>
       <li><b>Nutriments</b> : repris de la base Open Food Facts au scan, de valeurs moyennes pour les aliments courants, ou de ta saisie.</li>
       <li><b>Séances</b> : saisis les calories <em>actives</em> de ta montre, pas les calories totales.</li>
       <li>Ce sont des estimations : fie-toi à la tendance de la semaine plus qu'à un jour isolé.</li>
@@ -847,6 +919,18 @@ document.addEventListener('click', (e) => {
     case 'open-weight':
       openWeightSheet();
       break;
+    case 'apply-calibration':
+      store.getState().profile.calibration = Number(d.factor);
+      store.save();
+      render();
+      toast('Correction appliquée');
+      break;
+    case 'clear-calibration':
+      delete store.getState().profile.calibration;
+      store.save();
+      render();
+      toast('Correction retirée');
+      break;
     case 'close-sheet':
       closeSheet();
       break;
@@ -966,6 +1050,7 @@ document.addEventListener('submit', (e) => {
         targetKcal: Math.max(0, Math.round(num(f.targetKcal.value))),
         proteinGoal: Math.max(0, Math.round(num(f.proteinGoal.value))),
       };
+      if (old?.calibration) next.calibration = old.calibration; // la correction survit à la modification du profil
       store.getState().profile = next;
       store.save();
       if (first || old.weightKg !== next.weightKg) store.setWeight(todayKey(), next.weightKg);

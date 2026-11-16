@@ -562,3 +562,14 @@ textarea:focus-visible { outline: 2px solid var(--green); outline-offset: 2px; }
 .result-item { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .result-item span:first-child { display: flex; flex-direction: column; min-width: 0; font-size: .92rem; }
 .result-item small { color: var(--muted); }
+
+/* ---------- Rappel de pesée et calibrage ---------- */
+
+.reminder { display: flex; align-items: center; gap: 12px; background: var(--green-soft); box-shadow: none; }
+.reminder .btn { white-space: nowrap; }
+.checks { list-style: none; margin: 10px 0 0; padding: 0; display: grid; gap: 8px; font-size: .9rem; }
+.checks li { padding-left: 28px; position: relative; }
+.checks li::before { content: '○'; position: absolute; left: 4px; color: var(--muted); font-weight: 700; }
+.checks li.ok::before { content: '✓'; color: var(--green); }
+.checks small { color: var(--muted); display: block; }
+.pill-soft { background: var(--green-soft); color: var(--green); font-weight: 600; padding: 3px 9px; border-radius: 99px; }

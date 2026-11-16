@@ -119,7 +119,10 @@ export function dayStats(day, profile, weightKg, key) {
     eaten += mealTotals[m.id];
   }
   const macros = sumMacros(MEALS.flatMap((m) => day.meals[m.id] || []));
-  const burned = bmrKcal + stepsKcal + sportKcal;
+  // Estimation brute, puis correction personnelle issue du calibrage (1 = aucune).
+  const rawBurned = bmrKcal + stepsKcal + sportKcal;
+  const factor = Number(profile.calibration) || 1;
+  const burned = rawBurned * factor;
   return {
     weightKg,
     bmrKcal,
@@ -128,6 +131,8 @@ export function dayStats(day, profile, weightKg, key) {
     km: stepsToKm(netSteps, person.heightCm, person.sex),
     stepsKcal,
     sportKcal,
+    rawBurned,
+    calibrationKcal: burned - rawBurned,
     burned,
     eaten,
     mealTotals,
@@ -136,4 +141,49 @@ export function dayStats(day, profile, weightKg, key) {
     balance: eaten - burned, // négatif = déficit
     logged: eaten > 0,
   };
+}
+
+// ---------- Calibrage sur les pesées ----------
+
+export const CALIBRATION = { windowDays: 42, minSpanDays: 14, minCoverage: 0.8, maxCorrection: 0.25 };
+
+export function daysBetween(a, b) {
+  return Math.round((fromKey(b) - fromKey(a)) / 86400000);
+}
+
+// Compare, entre la première et la dernière pesée de la période, les calories
+// mangées et l'évolution réelle du poids, pour en déduire la dépense réelle.
+// `weights` : [{date, kg}] triées ; `statsFor(key)` : bilan d'un jour.
+export function calibrate(weights, statsFor, today) {
+  const from = addDays(today, -CALIBRATION.windowDays);
+  const ws = weights.filter((w) => w.date >= from && w.date <= today);
+  const out = { ready: false, weighIns: ws.length, span: 0, logged: 0, days: 0 };
+  if (ws.length < 2) return out;
+  const first = ws[0], last = ws[ws.length - 1];
+  out.span = daysBetween(first.date, last.date);
+  out.days = out.span;
+  let eaten = 0, estimated = 0;
+  for (let i = 0; i < out.span; i++) {
+    const s = statsFor(addDays(first.date, i));
+    if (!s.logged) continue;
+    out.logged++;
+    eaten += s.eaten;
+    estimated += s.rawBurned;
+  }
+  if (out.span < CALIBRATION.minSpanDays || out.logged < CALIBRATION.minCoverage * out.span) return out;
+
+  // Pente du poids en kg par jour : droite des moindres carrés à partir de
+  // 3 pesées (moins sensible à une pesée isolée), simple différence sinon.
+  let slope = (last.kg - first.kg) / out.span;
+  if (ws.length >= 3) {
+    const xs = ws.map((w) => daysBetween(first.date, w.date));
+    const mx = xs.reduce((a, b) => a + b, 0) / xs.length;
+    const my = ws.reduce((a, w) => a + w.kg, 0) / ws.length;
+    const den = xs.reduce((a, x) => a + (x - mx) ** 2, 0);
+    if (den > 0) slope = xs.reduce((a, x, i) => a + (x - mx) * (ws[i].kg - my), 0) / den;
+  }
+  const intake = eaten / out.logged;
+  const est = estimated / out.logged;
+  const observed = intake - slope * KCAL_PER_KG_FAT;
+  return { ...out, ready: true, intake, estimated: est, observed, factor: observed / est, deltaKg: slope * out.span, from: first.date, to: last.date };
 }
