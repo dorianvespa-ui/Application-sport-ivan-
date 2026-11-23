@@ -771,3 +771,8 @@ body::before {
 @media (prefers-color-scheme: dark) {
   .tabbar { background: linear-gradient(145deg, rgba(30, 44, 37, .86), rgba(20, 30, 25, .78)); }
 }
+
+/* Barre d'onglets plus basse : sur iPhone elle empiète sur la zone de la
+   barre d'accueil (34 px) au lieu de flotter au-dessus. */
+.tabbar { bottom: max(10px, calc(env(safe-area-inset-bottom) - 14px)); }
+#app { padding-bottom: calc(max(10px, env(safe-area-inset-bottom) - 14px) + 92px); }
