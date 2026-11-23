@@ -774,5 +774,5 @@ body::before {
 
 /* Barre d'onglets plus basse : sur iPhone elle empiète sur la zone de la
    barre d'accueil (34 px) au lieu de flotter au-dessus. */
-.tabbar { bottom: max(10px, calc(env(safe-area-inset-bottom) - 14px)); }
-#app { padding-bottom: calc(max(10px, env(safe-area-inset-bottom) - 14px) + 92px); }
+.tabbar { bottom: max(8px, calc(env(safe-area-inset-bottom) - 22px)); }
+#app { padding-bottom: calc(max(8px, env(safe-area-inset-bottom) - 22px) + 92px); }
