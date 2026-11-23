@@ -80,7 +80,72 @@ function render() {
   nextMove = null;
   app.innerHTML = `<div class="view${move ? ` enter-${move}` : ''}">${view}</div>` + tabBar();
   movePill();
+  animateCounts();
+  animateGauges();
+  highlightId = null;
 }
+
+// ---------- Compteurs animés ----------
+
+// Un nombre affiché via cnt() défile depuis sa dernière valeur jusqu'à la
+// nouvelle (ou depuis 0 la première fois). Le texte final est déjà dans le
+// HTML : sans animation, la bonne valeur s'affiche quand même.
+const FORMATS = { int: (v) => fmt(v), signed: (v) => signed(v), g: (v) => g1(v) };
+const lastCounts = new Map();
+const reduceMotion = () => window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+
+function cnt(key, value, kind = 'int') {
+  return `<span class="count" data-key="${key}" data-v="${value}" data-kind="${kind}">${FORMATS[kind](value)}</span>`;
+}
+
+function animateCounts() {
+  const els = document.querySelectorAll('.count');
+  const seen = new Set();
+  for (const el of els) {
+    const key = el.dataset.key;
+    const to = Number(el.dataset.v);
+    const from = lastCounts.has(key) ? lastCounts.get(key) : 0;
+    seen.add(key);
+    lastCounts.set(key, to);
+    if (reduceMotion() || Math.round(from * 10) === Math.round(to * 10)) continue;
+    const format = FORMATS[el.dataset.kind];
+    const dur = 900;
+    const t0 = performance.now();
+    const step = (now) => {
+      if (!el.isConnected) return;
+      const t = Math.min(1, (now - t0) / dur);
+      const e = 1 - Math.pow(1 - t, 4); // démarre vite, ralentit en douceur
+      el.textContent = format(from + (to - from) * e);
+      if (t < 1) requestAnimationFrame(step);
+    };
+    el.textContent = format(from);
+    requestAnimationFrame(step);
+  }
+}
+
+// Anneau et barre de protéines : partent de leur ancienne valeur.
+const lastRing = { ratio: 0, protein: 0 };
+function animateGauges() {
+  const ring = $('.ring-bar');
+  if (ring) {
+    const C = Number(ring.dataset.c), to = Number(ring.dataset.ratio);
+    ring.style.strokeDasharray = `${(C * lastRing.ratio).toFixed(1)} ${C.toFixed(1)}`;
+    ring.getBoundingClientRect();
+    requestAnimationFrame(() => (ring.style.strokeDasharray = `${(C * to).toFixed(1)} ${C.toFixed(1)}`));
+    lastRing.ratio = to;
+  }
+  const bar = $('.bar i');
+  if (bar) {
+    const to = bar.style.width;
+    bar.style.width = `${lastRing.protein}%`;
+    bar.getBoundingClientRect();
+    requestAnimationFrame(() => (bar.style.width = to));
+    lastRing.protein = parseFloat(to) || 0;
+  }
+}
+
+// Ligne d'aliment tout juste ajoutée ou modifiée : mise en valeur à l'affichage.
+let highlightId = null;
 
 // ---------- Animations de navigation ----------
 
@@ -142,7 +207,7 @@ function dayView() {
   ${nutritionCard(s.macros, p, s.logged)}
 
   <section class="card">
-    <div class="card-head"><h2>Dépenses</h2><strong>${fmt(s.burned)} kcal</strong></div>
+    <div class="card-head"><h2>Dépenses</h2><strong>${cnt('burned', s.burned)} kcal</strong></div>
     <div class="row">
       <span class="row-ic">🔥</span>
       <div class="row-main"><b>Métabolisme de base</b><small>Au repos, pour ${kg(s.weightKg)}</small></div>
@@ -188,7 +253,7 @@ function dayView() {
     <button class="add" data-act="open-workout">+ Ajouter une séance de sport</button>
   </section>
 
-  <div class="section-title"><h2>Repas</h2><strong>${fmt(s.eaten)} kcal</strong></div>
+  <div class="section-title"><h2>Repas</h2><strong>${cnt('eaten', s.eaten)} kcal</strong></div>
   ${MEALS.map((m) => mealCard(m, day, s, key)).join('')}
   ${day.workouts.length || s.eaten > 0 ? '<p class="hint">Astuce : glisse une ligne vers la gauche pour la supprimer.</p>' : ''}
   `;
@@ -218,15 +283,15 @@ function heroCard(s, p) {
     <div class="ring">
       <svg viewBox="0 0 120 120" aria-hidden="true">
         <circle class="ring-track" cx="60" cy="60" r="52"/>
-        <circle class="ring-bar ${s.logged && tone(s.balance) === 'bad' ? 'over' : ''}" cx="60" cy="60" r="52" stroke-dasharray="${(C * ratio).toFixed(1)} ${C.toFixed(1)}" transform="rotate(-90 60 60)"/>
+        <circle class="ring-bar ${s.logged && tone(s.balance) === 'bad' ? 'over' : ''}" cx="60" cy="60" r="52" stroke-dasharray="${(C * ratio).toFixed(1)} ${C.toFixed(1)}" data-c="${C}" data-ratio="${ratio}" transform="rotate(-90 60 60)"/>
       </svg>
-      <div class="ring-center"><b>${s.logged ? signed(s.balance) : fmt(s.burned)}</b><small>${s.logged ? 'kcal' : 'kcal dépensées'}</small></div>
+      <div class="ring-center"><b>${s.logged ? cnt('hero-balance', s.balance, 'signed') : cnt('hero-burned0', s.burned)}</b><small>${s.logged ? 'kcal' : 'kcal dépensées'}</small></div>
     </div>
     <div class="hero-info">
       <span class="pill ${pill}">${status}</span>
       <dl>
-        <div><dt>Ingérées</dt><dd>${fmt(s.eaten)}</dd></div>
-        <div><dt>Dépensées</dt><dd>${fmt(s.burned)}</dd></div>
+        <div><dt>Ingérées</dt><dd>${cnt('hero-eaten', s.eaten)}</dd></div>
+        <div><dt>Dépensées</dt><dd>${cnt('hero-burned', s.burned)}</dd></div>
       </dl>
       ${goal ? `<p class="goal">${goal}</p>` : ''}
     </div>
@@ -257,7 +322,7 @@ function nutritionCard(m, p, logged) {
   <section class="card nutri" aria-label="Nutrition du jour">
     <div class="nutri-main">
       <div class="nutri-head"><small>Protéines</small>${reached ? '<span class="pill good">Objectif atteint</span>' : ''}</div>
-      <p class="nutri-big"><b>${g1(m.protein)}</b>${goal ? ` <span>/ ${fmt(goal)} g</span>` : ' <span>g</span>'}</p>
+      <p class="nutri-big"><b>${cnt('protein', m.protein, 'g')}</b>${goal ? ` <span>/ ${fmt(goal)} g</span>` : ' <span>g</span>'}</p>
       ${
         goal
           ? `<div class="bar" role="progressbar" aria-valuemin="0" aria-valuemax="${goal}" aria-valuenow="${Math.round(m.protein)}" aria-label="Protéines"><i style="width:${pct.toFixed(1)}%"></i></div>
@@ -266,8 +331,8 @@ function nutritionCard(m, p, logged) {
       }
     </div>
     <div class="nutri-side">
-      <div><small>Glucides</small><b>${g1(m.carbs)} g</b></div>
-      <div><small>Fibres</small><b>${g1(m.fiber)} g</b></div>
+      <div><small>Glucides</small><b>${cnt('carbs', m.carbs, 'g')} g</b></div>
+      <div><small>Fibres</small><b>${cnt('fiber', m.fiber, 'g')} g</b></div>
     </div>
     ${logged && m.missing ? `<small class="nutri-note">${m.missing} aliment${m.missing > 1 ? 's' : ''} sans nutriments renseignés : ces totaux sont sous-estimés.</small>` : ''}
   </section>`;
@@ -278,12 +343,12 @@ function mealCard(m, day, s, key) {
   const prev = store.getDay(addDays(key, -1)).meals[m.id];
   return `
   <section class="card meal">
-    <div class="card-head"><h3><span>${m.icon}</span> ${m.label}</h3>${items.length ? `<strong>${fmt(s.mealTotals[m.id])} kcal</strong>` : ''}</div>
+    <div class="card-head"><h3><span>${m.icon}</span> ${m.label}</h3>${items.length ? `<strong>${cnt(`meal-${m.id}`, s.mealTotals[m.id])} kcal</strong>` : ''}</div>
     ${items.length > 1 && s.mealMacros[m.id].missing < items.length ? `<p class="meal-macros">${macroLine(s.mealMacros[m.id])}</p>` : ''}
     ${items
       .map(
         (it) => `
-    <div class="swipe"><div class="row swipe-content tappable" data-act="edit-food" data-meal="${m.id}" data-id="${it.id}" role="button" tabindex="0" aria-label="Modifier ${esc(it.name)}">
+    <div class="swipe${it.id === highlightId ? ' just-added' : ''}"><div class="row swipe-content tappable" data-act="edit-food" data-meal="${m.id}" data-id="${it.id}" role="button" tabindex="0" aria-label="Modifier ${esc(it.name)}">
       <div class="row-main"><b>${esc(it.name)}</b>${[it.qty ? `${fmt(it.qty)} g` : '', macroLine(it.macros)].filter(Boolean).map((t) => `<small>${t}</small>`).join('')}</div>
       <span class="row-val">${fmt(it.kcal)}<small>kcal</small></span>
     </div><button class="swipe-del" data-act="del-food" data-meal="${m.id}" data-id="${it.id}" aria-label="Supprimer ${esc(it.name)}">Supprimer</button></div>`
@@ -329,10 +394,10 @@ function statsView() {
       ? `<section class="card empty"><p>Aucun repas saisi cette semaine.</p><small>Les jours sans repas ne comptent pas dans les moyennes.</small></section>`
       : `
   <section class="tiles">
-    <div class="tile ${tone(total)}"><small>Bilan de la semaine</small><b>${signed(total)}</b><span>kcal · ≈ ${fmt(grams)} g de ${gain ? 'poids' : 'graisse'} ${total > 0 ? 'en plus' : 'en moins'}</span></div>
+    <div class="tile ${tone(total)}"><small>Bilan de la semaine</small><b>${cnt('week-total', total, 'signed')}</b><span>kcal · ≈ ${fmt(grams)} g de ${gain ? 'poids' : 'graisse'} ${total > 0 ? 'en plus' : 'en moins'}</span></div>
     <div class="tile"><small>Jours en ${gain ? 'surplus' : 'déficit'}</small><b>${goalDays} / ${n}</b><span>${n < 7 ? `${n} jour${n > 1 ? 's' : ''} renseigné${n > 1 ? 's' : ''}` : 'semaine complète'}</span></div>
-    <div class="tile"><small>Moyenne par jour</small><b>${signed(total / n)}</b><span>kcal de bilan</span></div>
-    <div class="tile"><small>Ingéré / dépensé</small><b>${fmt(sum((d) => d.eaten) / n)}</b><span>pour ${fmt(sum((d) => d.burned) / n)} kcal dépensées / jour</span></div>
+    <div class="tile"><small>Moyenne par jour</small><b>${cnt('week-avg', total / n, 'signed')}</b><span>kcal de bilan</span></div>
+    <div class="tile"><small>Ingéré / dépensé</small><b>${cnt('week-eaten', sum((d) => d.eaten) / n)}</b><span>pour ${fmt(sum((d) => d.burned) / n)} kcal dépensées / jour</span></div>
   </section>
   ${weekNutrition(logged)}`
   }
@@ -430,7 +495,7 @@ function weekChart(days) {
       const ty = deficit ? zero + h + 13 : zero - h - 5;
       return `<g data-act="go-day" data-key="${d.key}" class="ch-bar-g">
         <rect class="ch-hit" x="${col * i}" y="0" width="${col}" height="190"/>
-        <rect class="ch-bar ${tone(d.balance)}" x="${cx - 13}" y="${y}" width="26" height="${h}" rx="6"/>
+        <rect class="ch-bar ${tone(d.balance)} ${deficit ? 'down' : 'up'}" style="--d:${i * 60}ms" x="${cx - 13}" y="${y}" width="26" height="${h}" rx="6"/>
         <text class="ch-val" x="${cx}" y="${ty}" text-anchor="middle">${signed(d.balance)}</text></g>${label}`;
     })
     .join('');
@@ -641,8 +706,25 @@ function openSheet(title, body) {
 
 function closeSheet() {
   stopScanner();
-  $('#sheet-root').innerHTML = '';
+  const root = $('#sheet-root');
   document.body.classList.remove('sheet-open');
+  if (!root.innerHTML) return;
+  if (reduceMotion()) {
+    root.innerHTML = '';
+    return;
+  }
+  // Copie de la fenêtre qui descend en s'effaçant ; la vraie est retirée
+  // tout de suite pour ne gêner aucune nouvelle ouverture.
+  const ghost = document.createElement('div');
+  ghost.className = 'sheet-ghost';
+  ghost.append(...root.childNodes); // garde les valeurs saisies pendant la sortie
+  ghost.querySelectorAll('[data-act], [data-form], [id]').forEach((el) => {
+    el.removeAttribute('data-act');
+    el.removeAttribute('data-form');
+    el.removeAttribute('id');
+  });
+  document.body.appendChild(ghost);
+  setTimeout(() => ghost.remove(), 420);
 }
 
 let suggestions = [];
@@ -1189,6 +1271,7 @@ document.addEventListener('submit', (e) => {
         if (editId) day.meals[form.dataset.meal] = list.map((it) => (it.id === editId ? item : it));
         else list.push(item);
       });
+      highlightId = item.id;
       closeSheet();
       render();
       toast(`${name} ${editId ? 'modifié' : 'ajouté'} · ${fmt(item.kcal)} kcal`);
