@@ -776,3 +776,10 @@ body::before {
    barre d'accueil (34 px) au lieu de flotter au-dessus. */
 .tabbar { bottom: max(8px, calc(env(safe-area-inset-bottom) - 22px)); }
 #app { padding-bottom: calc(max(8px, env(safe-area-inset-bottom) - 22px) + 92px); }
+
+/* Verre des cartes un peu plus transparent (la barre d'onglets et la
+   fenêtre du bas, qui passent au-dessus du texte, gardent leur densité). */
+:root { --glass: linear-gradient(145deg, rgba(255, 255, 255, .5), rgba(255, 255, 255, .24)); }
+@media (prefers-color-scheme: dark) {
+  :root { --glass: linear-gradient(145deg, rgba(255, 255, 255, .09), rgba(255, 255, 255, .03)); }
+}
