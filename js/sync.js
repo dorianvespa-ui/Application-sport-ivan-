@@ -10,6 +10,15 @@ const SUPABASE_URL = 'https://srbfrwoptmjlhrvbjvfc.supabase.co';
 const SUPABASE_KEY = 'sb_publishable_BXVYVBObjQC_Td9mWeyfag_1saBaWrh';
 const TABLE = 'equilibre_data';
 
+// Lien de réinitialisation du mot de passe : Supabase renvoie vers l'app avec
+// « type=recovery » dans l'adresse (à lire avant que le client ne la nettoie).
+const RECOVERY_LINK = /type=recovery/.test(location.hash);
+export const isRecoveryLink = () => RECOVERY_LINK;
+let onRecovery = () => {};
+export function setRecoveryListener(fn) {
+  onRecovery = fn;
+}
+
 let sb = null;
 let user = null;
 let pushTimer = null;
@@ -35,8 +44,9 @@ function client() {
   if (!sb) {
     if (!window.supabase) throw new Error('Le module de connexion ne s\'est pas chargé.');
     sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
-    sb.auth.onAuthStateChange((_event, session) => {
+    sb.auth.onAuthStateChange((event, session) => {
       user = session?.user ?? null;
+      if (event === 'PASSWORD_RECOVERY') onRecovery();
     });
   }
   return sb;
@@ -58,6 +68,8 @@ function translate(error) {
   if (/signups? not allowed|signup is disabled/i.test(m)) return 'La création de compte est désactivée sur le serveur.';
   if (/rate limit|too many/i.test(m)) return 'Trop de tentatives. Réessaie dans quelques minutes.';
   if (/failed to fetch|network|load failed/i.test(m)) return 'Pas de connexion à internet.';
+  if (/for security purposes|only request this after/i.test(m)) return 'Patiente une minute avant de redemander un e-mail.';
+  if (/should be different|same password/i.test(m)) return "Choisis un mot de passe différent de l'ancien.";
   if (/invalid.*email|email.*invalid/i.test(m)) return "Cette adresse e-mail n'est pas valide.";
   return m || 'Une erreur est survenue.';
 }
@@ -80,6 +92,21 @@ export async function signUp(email, password) {
   }
   // Sans session, Supabase attend la confirmation de l'adresse e-mail.
   if (!data.session) return null;
+  user = data.user;
+  return user;
+}
+
+// Envoie l'e-mail de réinitialisation ; le lien ramène sur cette page.
+export async function resetPassword(email) {
+  const redirectTo = location.origin + location.pathname;
+  const { error } = await client().auth.resetPasswordForEmail(email, { redirectTo });
+  if (error) throw new Error(translate(error));
+}
+
+// Enregistre le nouveau mot de passe (session ouverte par le lien reçu).
+export async function updatePassword(password) {
+  const { data, error } = await client().auth.updateUser({ password });
+  if (error) throw new Error(translate(error));
   user = data.user;
   return user;
 }

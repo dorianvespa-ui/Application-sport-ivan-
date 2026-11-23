@@ -16,6 +16,10 @@ export const MACROS = [
 
 export const KCAL_PER_KG_FAT = 7700;
 
+// Effet thermique des aliments : la digestion consomme environ 10 % des
+// calories mangées (plus pour les protéines, moins pour les graisses).
+export const TEF_RATE = 0.1;
+
 // Additionne les nutriments d'une liste d'aliments. `missing` compte les
 // aliments saisis sans aucun nutriment (le total est alors sous-estimé).
 export function sumMacros(items) {
@@ -120,7 +124,8 @@ export function dayStats(day, profile, weightKg, key) {
   }
   const macros = sumMacros(MEALS.flatMap((m) => day.meals[m.id] || []));
   // Estimation brute, puis correction personnelle issue du calibrage (1 = aucune).
-  const rawBurned = bmrKcal + stepsKcal + sportKcal;
+  const tefKcal = eaten * TEF_RATE;
+  const rawBurned = bmrKcal + stepsKcal + sportKcal + tefKcal;
   const factor = Number(profile.calibration) || 1;
   const burned = rawBurned * factor;
   return {
@@ -131,6 +136,7 @@ export function dayStats(day, profile, weightKg, key) {
     km: stepsToKm(netSteps, person.heightCm, person.sex),
     stepsKcal,
     sportKcal,
+    tefKcal,
     rawBurned,
     calibrationKcal: burned - rawBurned,
     burned,

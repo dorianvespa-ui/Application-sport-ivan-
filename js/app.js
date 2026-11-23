@@ -54,6 +54,10 @@ const ICONS = {
 
 function render() {
   const app = $('#app');
+  if (ui.auth === 'recovery') {
+    app.innerHTML = recoveryView();
+    return;
+  }
   if (ui.auth !== 'in') {
     app.innerHTML = ui.auth === 'out' ? authView() : `<section class="welcome"><img src="icons/icon.svg" alt="" width="72" height="72"><h1>Équilibre</h1><p>Chargement…</p></section>`;
     return;
@@ -118,6 +122,15 @@ function dayView() {
       <div class="row-main"><b>Métabolisme de base</b><small>Au repos, pour ${kg(s.weightKg)}</small></div>
       <span class="row-val">${fmt(s.bmrKcal)}</span>
     </div>
+    ${
+      s.tefKcal >= 1
+        ? `<div class="row">
+      <span class="row-ic">🍽️</span>
+      <div class="row-main"><b>Digestion</b><small>≈ 10 % de ce que tu as mangé</small></div>
+      <span class="row-val">${fmt(s.tefKcal)}</span>
+    </div>`
+        : ''
+    }
     ${
       Math.round(s.calibrationKcal)
         ? `<div class="row">
@@ -244,7 +257,7 @@ function mealCard(m, day, s, key) {
     ${items
       .map(
         (it) => `
-    <div class="swipe"><div class="row swipe-content">
+    <div class="swipe"><div class="row swipe-content tappable" data-act="edit-food" data-meal="${m.id}" data-id="${it.id}" role="button" tabindex="0" aria-label="Modifier ${esc(it.name)}">
       <div class="row-main"><b>${esc(it.name)}</b>${[it.qty ? `${fmt(it.qty)} g` : '', macroLine(it.macros)].filter(Boolean).map((t) => `<small>${t}</small>`).join('')}</div>
       <span class="row-val">${fmt(it.kcal)}<small>kcal</small></span>
     </div><button class="swipe-del" data-act="del-food" data-meal="${m.id}" data-id="${it.id}" aria-label="Supprimer ${esc(it.name)}">Supprimer</button></div>`
@@ -479,6 +492,7 @@ function profileFields(p) {
 }
 
 function authView() {
+  if (ui.authMode === 'forgot') return forgotView();
   const signup = ui.authMode === 'signup';
   return `
   <section class="welcome">
@@ -493,6 +507,38 @@ function authView() {
     <p id="auth-msg" class="error" role="alert" hidden></p>
     <button class="btn" type="submit">${signup ? 'Créer mon compte' : 'Se connecter'}</button>
     <button class="link" type="button" data-act="auth-mode">${signup ? "J'ai déjà un compte" : 'Créer un compte'}</button>
+    ${signup ? '' : '<button class="link muted-link" type="button" data-act="auth-forgot">Mot de passe oublié ?</button>'}
+  </form>`;
+}
+
+function forgotView() {
+  return `
+  <section class="welcome">
+    <img src="icons/icon.svg" alt="" width="72" height="72">
+    <h1>Mot de passe oublié</h1>
+    <p>Indique ton e-mail : tu recevras un lien pour choisir un nouveau mot de passe.</p>
+  </section>
+  <form class="card form" data-form="forgot">
+    <label class="field">E-mail <input name="email" type="email" autocomplete="email" inputmode="email" autocapitalize="none" required></label>
+    <p id="auth-msg" class="error" role="alert" hidden></p>
+    <button class="btn" type="submit">Envoyer le lien</button>
+    <button class="link" type="button" data-act="auth-back">Retour à la connexion</button>
+  </form>`;
+}
+
+// Arrivée par le lien de l'e-mail : choix du nouveau mot de passe.
+function recoveryView() {
+  return `
+  <section class="welcome">
+    <img src="icons/icon.svg" alt="" width="72" height="72">
+    <h1>Nouveau mot de passe</h1>
+    <p>Choisis ton nouveau mot de passe.</p>
+  </section>
+  <form class="card form" data-form="newpass">
+    <label class="field">Nouveau mot de passe <input name="password" type="password" autocomplete="new-password" minlength="6" required></label>
+    <small class="muted">6 caractères minimum.</small>
+    <p id="auth-msg" class="error" role="alert" hidden></p>
+    <button class="btn" type="submit">Enregistrer</button>
   </form>`;
 }
 
@@ -534,6 +580,7 @@ function profileView() {
     <ul class="notes">
       <li><b>Métabolisme de base</b> : formule de Mifflin-St Jeor (sexe, âge, taille, poids).</li>
       <li><b>Pas</b> : distance estimée d'après ta taille, puis environ 0,5 kcal par kg et par km.</li>
+      <li><b>Digestion</b> : digérer consomme environ 10 % des calories mangées (effet thermique des aliments), ajoutés à ta dépense.</li>
       <li><b>Calibrage</b> : dans l'onglet Bilan, ta dépense réelle est déduite de tes repas et de tes pesées, à raison de 7 700 kcal par kg.</li>
       <li><b>Nutriments</b> : repris de la base Open Food Facts au scan, de valeurs moyennes pour les aliments courants, ou de ta saisie.</li>
       <li><b>Séances</b> : saisis les calories <em>actives</em> de ta montre, pas les calories totales.</li>
@@ -574,10 +621,11 @@ function closeSheet() {
 
 let suggestions = [];
 
-function openFoodSheet(mealId) {
+// `item` : aliment existant à modifier (sinon, ajout d'un nouvel aliment).
+function openFoodSheet(mealId, item = null) {
   const meal = MEALS.find((m) => m.id === mealId);
-  openSheet(`${meal.icon} ${meal.label}`, `
-    <form class="form" data-form="food" data-meal="${mealId}" novalidate>
+  openSheet(`${meal.icon} ${item ? 'Modifier' : meal.label}`, `
+    <form class="form" data-form="food" data-meal="${mealId}" ${item ? `data-edit="${item.id}"` : ''} novalidate>
       <div class="btn-row three">
         <button type="button" class="btn secondary stack" data-act="scan"><span aria-hidden="true">▮▯▮</span>Scanner</button>
         <button type="button" class="btn secondary stack" data-act="history" aria-expanded="false" aria-controls="history"><span aria-hidden="true">↺</span>Historique</button>
@@ -620,7 +668,7 @@ function openFoodSheet(mealId) {
       </fieldset>
       <p id="food-preview" class="preview" hidden></p>
       <p id="food-error" class="error" hidden></p>
-      <button class="btn" type="submit">Ajouter</button>
+      <button class="btn" type="submit">${item ? 'Enregistrer' : 'Ajouter'}</button>
     </form>`);
   updateSuggestions($('[data-form="food"]'));
 }
@@ -956,6 +1004,14 @@ document.addEventListener('click', (e) => {
       fillFood(el.closest('form'), historyItems[Number(d.i)]);
       toggleHistory(false);
       break;
+    case 'edit-food': {
+      const item = store.getDay(ui.date).meals[d.meal].find((it) => it.id === d.id);
+      if (item) {
+        openFoodSheet(d.meal, item);
+        fillFood($('[data-form="food"]'), item);
+      }
+      break;
+    }
     case 'del-food':
       store.updateDay(ui.date, (day) => {
         day.meals[d.meal] = day.meals[d.meal].filter((it) => it.id !== d.id);
@@ -982,6 +1038,14 @@ document.addEventListener('click', (e) => {
       break;
     case 'export':
       exportData();
+      break;
+    case 'auth-forgot':
+      ui.authMode = 'forgot';
+      render();
+      break;
+    case 'auth-back':
+      ui.authMode = 'signin';
+      render();
       break;
     case 'auth-mode':
       ui.authMode = ui.authMode === 'signup' ? 'signin' : 'signup';
@@ -1037,6 +1101,12 @@ document.addEventListener('submit', (e) => {
     case 'auth':
       submitAuth(form);
       break;
+    case 'forgot':
+      submitForgot(form);
+      break;
+    case 'newpass':
+      submitNewPassword(form);
+      break;
     case 'profile': {
       const first = !profile();
       const old = profile();
@@ -1074,10 +1144,16 @@ document.addEventListener('submit', (e) => {
         item.qty = num(f.qty.value);
       }
       Object.assign(item, foodMacros(form));
-      store.updateDay(ui.date, (day) => day.meals[form.dataset.meal].push(item));
+      const editId = form.dataset.edit;
+      if (editId) item.id = editId;
+      store.updateDay(ui.date, (day) => {
+        const list = day.meals[form.dataset.meal];
+        if (editId) day.meals[form.dataset.meal] = list.map((it) => (it.id === editId ? item : it));
+        else list.push(item);
+      });
       closeSheet();
       render();
-      toast(`${name} ajouté · ${fmt(item.kcal)} kcal`);
+      toast(`${name} ${editId ? 'modifié' : 'ajouté'} · ${fmt(item.kcal)} kcal`);
       break;
     }
     case 'workout': {
@@ -1143,7 +1219,11 @@ function endDrag() {
   const d = drag;
   drag = null;
   if (!d.active) {
-    // Simple appui sur une ligne ouverte : on la referme.
+    // Simple appui sur une ligne ouverte : on la referme, sans la modifier.
+    if (d.base !== 0) {
+      swallowClick = true;
+      setTimeout(() => (swallowClick = false), 50);
+    }
     d.wrap.classList.remove('open');
     return;
   }
@@ -1174,6 +1254,11 @@ document.addEventListener('focusin', (e) => {
 });
 
 document.addEventListener('keydown', (e) => {
+  if ((e.key === 'Enter' || e.key === ' ') && e.target.matches?.('.tappable')) {
+    e.preventDefault();
+    e.target.click();
+    return;
+  }
   if (e.key === 'Escape' && $('#sheet-root').innerHTML) closeSheet();
 });
 
@@ -1271,6 +1356,45 @@ async function submitAuth(form) {
   }
 }
 
+async function submitForgot(form) {
+  const msg = $('#auth-msg');
+  const btn = $('button[type="submit"]', form);
+  msg.hidden = true;
+  btn.disabled = true;
+  try {
+    await sync.resetPassword(form.email.value.trim());
+    msg.className = 'scan-msg ok';
+    msg.textContent = "C'est envoyé. Ouvre le lien reçu par e-mail (pense aux indésirables) pour choisir ton nouveau mot de passe.";
+  } catch (e) {
+    msg.className = 'error';
+    msg.textContent = e.message;
+    btn.disabled = false;
+  }
+  msg.hidden = false;
+}
+
+async function submitNewPassword(form) {
+  const msg = $('#auth-msg');
+  const btn = $('button[type="submit"]', form);
+  msg.hidden = true;
+  btn.disabled = true;
+  try {
+    const user = await sync.updatePassword(form.password.value);
+    history.replaceState(null, '', location.pathname); // retire le jeton de l'adresse
+    store.setOwner(user.id);
+    ui.synced = wasSynced(user.id);
+    ui.auth = 'in';
+    ui.view = 'day';
+    render();
+    toast('Mot de passe changé');
+    await runSync();
+  } catch (e) {
+    msg.textContent = e.message;
+    msg.hidden = false;
+    btn.disabled = false;
+  }
+}
+
 async function logout() {
   if (sync.hasPending() && sync.status.state === 'offline' && !confirm("Tes derniers changements n'ont pas encore été envoyés en ligne et seront perdus. Se déconnecter quand même ?")) return;
   await sync.flush();
@@ -1291,12 +1415,22 @@ sync.setStatusListener(() => {
   if (el) el.textContent = syncLabel();
 });
 
+sync.setRecoveryListener(() => {
+  ui.auth = 'recovery';
+  render();
+});
+
 async function boot() {
   let user = null;
   try {
     user = await sync.init();
   } catch (e) {
     console.warn(e);
+  }
+  if (user && sync.isRecoveryLink()) {
+    ui.auth = 'recovery';
+    render();
+    return;
   }
   if (user) {
     store.setOwner(user.id);
