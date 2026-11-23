@@ -1131,6 +1131,7 @@ document.addEventListener('pointermove', (e) => {
     if (Math.abs(dy) > 10 && Math.abs(dy) > Math.abs(dx)) return void (drag = null); // défilement vertical
     if (Math.abs(dx) < 8) return;
     drag.active = true;
+    drag.wrap.classList.add('dragging'); // dévoile le bouton pendant le geste
     drag.content.style.transition = 'none';
   }
   drag.x = Math.max(-SWIPE_W - 24, Math.min(0, drag.base + dx));
@@ -1146,6 +1147,7 @@ function endDrag() {
     d.wrap.classList.remove('open');
     return;
   }
+  d.wrap.classList.remove('dragging');
   d.content.style.transition = '';
   d.content.style.transform = '';
   d.wrap.classList.toggle('open', d.x < -SWIPE_W / 2);
