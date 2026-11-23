@@ -76,13 +76,39 @@ function render() {
     return;
   }
   const view = ui.view === 'stats' ? statsView() : ui.view === 'profile' ? profileView() : dayView();
-  app.innerHTML = view + tabBar();
+  const move = nextMove;
+  nextMove = null;
+  app.innerHTML = `<div class="view${move ? ` enter-${move}` : ''}">${view}</div>` + tabBar();
+  movePill();
 }
 
+// ---------- Animations de navigation ----------
+
+const TABS = ['day', 'stats', 'profile'];
+// Onglet affiché au rendu précédent : la pastille part de là pour glisser.
+let pillFrom = 0;
+// Sens d'arrivée du prochain contenu ('left' | 'right'), consommé par render().
+let nextMove = null;
+
 function tabBar() {
+  const i = TABS.indexOf(ui.view);
   const tab = (id, label) =>
     `<button class="tab ${ui.view === id ? 'active' : ''}" data-act="tab" data-view="${id}" ${ui.view === id ? 'aria-current="page"' : ''}>${ICONS[id]}<span>${label}</span></button>`;
-  return `<nav class="tabbar">${tab('day', 'Journée')}${tab('stats', 'Bilan')}${tab('profile', 'Profil')}</nav>`;
+  return `<nav class="tabbar"><span class="tab-pill" style="--i:${pillFrom}" data-to="${i}" aria-hidden="true"></span>${tab('day', 'Journée')}${tab('stats', 'Bilan')}${tab('profile', 'Profil')}</nav>`;
+}
+
+// Fait glisser la pastille vers l'onglet actif, avec un effet de goutte qui s'étire.
+function movePill() {
+  const pill = $('.tab-pill');
+  if (!pill) return;
+  const to = Number(pill.dataset.to);
+  if (to !== pillFrom) {
+    pill.getBoundingClientRect(); // position de départ prise en compte avant le déplacement
+    pill.classList.add('moving');
+    pill.style.setProperty('--i', to);
+    pill.addEventListener('animationend', () => pill.classList.remove('moving'), { once: true });
+  }
+  pillFrom = to;
 }
 
 // ---------- Vue Journée ----------
@@ -935,6 +961,11 @@ document.addEventListener('click', (e) => {
   const d = el.dataset;
   switch (d.act) {
     case 'tab':
+      if (d.view === ui.view) {
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+        break;
+      }
+      nextMove = TABS.indexOf(d.view) > TABS.indexOf(ui.view) ? 'right' : 'left';
       ui.view = d.view;
       render();
       if (d.view === 'profile') showAiUsage();
@@ -942,17 +973,24 @@ document.addEventListener('click', (e) => {
       break;
     case 'day-shift': {
       const next = addDays(ui.date, Number(d.n));
-      if (next <= todayKey()) ui.date = next;
+      if (next <= todayKey() && next !== ui.date) {
+        nextMove = Number(d.n) > 0 ? 'right' : 'left';
+        ui.date = next;
+      }
       render();
       break;
     }
     case 'week-shift': {
       const next = addDays(ui.week, Number(d.n));
-      if (next <= todayKey()) ui.week = next;
+      if (next <= todayKey() && next !== ui.week) {
+        nextMove = Number(d.n) > 0 ? 'right' : 'left';
+        ui.week = next;
+      }
       render();
       break;
     }
     case 'go-day':
+      nextMove = 'left';
       ui.date = d.key;
       ui.view = 'day';
       render();
